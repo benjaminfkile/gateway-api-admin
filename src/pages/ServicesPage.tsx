@@ -36,6 +36,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import DeployDialog from "../components/DeployDialog";
 import RollbackDialog from "../components/RollbackDialog";
 import ServiceFormDialog from "../components/ServiceFormDialog";
+import LiveDot from "../components/LiveDot";
+import { useFleetStatus } from "../hooks/useOpsChannel";
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -199,6 +201,10 @@ export default function ServicesPage() {
     return () => clearInterval(id);
   }, [load]);
 
+  // Live fleet events refresh the grid immediately; polling above is the
+  // fallback whenever the hub is disconnected.
+  const { connected: live } = useFleetStatus(load);
+
   const openMenu = (event: React.MouseEvent<HTMLElement>, service: ServiceSummary) => {
     setMenuAnchor(event.currentTarget);
     setMenuService(service);
@@ -258,7 +264,10 @@ export default function ServicesPage() {
         direction="row"
         sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
       >
-        <Typography variant="h5">Services</Typography>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <Typography variant="h5">Services</Typography>
+          <LiveDot connected={live} />
+        </Stack>
         <Stack direction="row" spacing={1}>
           <Button
             startIcon={<AddIcon />}

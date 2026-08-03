@@ -23,6 +23,8 @@ import instancesApi from "../api/instancesApi";
 import type { InstanceInfo } from "../api/types";
 import { formatRelative } from "./ServicesPage";
 import { shortDigest } from "./DeploysPage";
+import LiveDot from "../components/LiveDot";
+import { useFleetStatus } from "../hooks/useOpsChannel";
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -142,6 +144,9 @@ export default function InstancesPage() {
     return () => clearInterval(id);
   }, [load]);
 
+  // Live fleet events refresh the table immediately; polling is the fallback.
+  const { connected: live } = useFleetStatus(load);
+
   const summary = useMemo(() => summarize(instances ?? []), [instances]);
 
   const showSkeleton = loading && instances === null;
@@ -153,7 +158,10 @@ export default function InstancesPage() {
         direction="row"
         sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
       >
-        <Typography variant="h5">Instances</Typography>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <Typography variant="h5">Instances</Typography>
+          <LiveDot connected={live} />
+        </Stack>
         <Button
           startIcon={<RefreshIcon />}
           onClick={load}

@@ -11,23 +11,31 @@ vi.mock("../lib/cognitoClient", () => ({
   getAccessToken: () => Promise.resolve(null),
 }));
 
+// The SignalR hub is mocked wholesale — no real connection is made in tests.
+import * as hubClient from "../lib/hubClient";
+vi.mock("../lib/hubClient");
+
 import apiClient from "../api/apiClient";
 import type { DeployDetail, DeploySummary } from "../api/types";
-import DeploysPage from "./DeploysPage";
+import DeploysPage, { applyDeployEvent } from "./DeploysPage";
 import { SnackbarProvider } from "../contexts/SnackbarContext";
 import { ThemeModeProvider } from "../theme/ThemeModeProvider";
+import { installHubMock, type HubMockControl } from "../test/hubClientMock";
 
 const POLL_TICK_ACTIVE = 5_000;
 const POLL_TICK_IDLE = 30_000;
 
 let mock: MockAdapter;
+let hub: HubMockControl;
 
 beforeEach(() => {
   mock = new MockAdapter(apiClient);
+  hub = installHubMock(hubClient);
 });
 
 afterEach(() => {
   mock.restore();
+  vi.clearAllMocks();
   vi.useRealTimers();
 });
 
@@ -110,6 +118,7 @@ describe("DeploysPage", () => {
     renderPage();
 
     const table = await historyTable();
+    await within(table).findByText("worker");
     await user.click(within(rowFor(table, "worker")).getByText("worker"));
 
     const panel = await screen.findByRole("region", { name: /deploy d-2 detail/i });
@@ -120,6 +129,86 @@ describe("DeploysPage", () => {
     );
     expect(within(panel).getByText("i-0003")).toBeInTheDocument();
     expect(within(panel).getByText("pulling image")).toBeInTheDocument();
+  });
+
+  it("applies a live deploy-progress event to the open drawer immediately", async () => {
+    const user = userEvent.setup();
+    const detail: DeployDetail = {
+      ...IN_PROGRESS,
+      instances: [
+        { instanceId: "i-0001", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:10Z" },
+        { instanceId: "i-0002", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:12Z" },
+        { instanceId: "i-0003", status: "updating", detail: "pulling image", updatedAt: "2026-08-03T00:00:14Z" },
+      ],
+    };
+    mock.onGet("/mgmt/deploys").reply(200, [IN_PROGRESS]);
+    mock.onGet("/mgmt/deploys/d-2").reply(200, detail);
+    renderPage();
+
+    const table = await historyTable();
+    await within(table).findByText("worker");
+    await user.click(within(rowFor(table, "worker")).getByText("worker"));
+
+    const panel = await screen.findByRole("region", { name: /deploy d-2 detail/i });
+    expect(within(panel).getByText("2/3 instances converged")).toBeInTheDocument();
+
+    // A live event converges the last instance — the drawer updates without a refetch.
+    const detailGets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/deploys/d-2").length;
+    const before = detailGets();
+
+    act(() =>
+      hub.emit("ops:deploys", {
+        event: "progress",
+        deployId: "d-2",
+        instance: {
+          instanceId: "i-0003",
+          status: "converged",
+          detail: null,
+          updatedAt: "2026-08-03T00:00:20Z",
+        },
+        status: "done",
+      }),
+    );
+
+    expect(await within(panel).findByText("3/3 instances converged")).toBeInTheDocument();
+    // Status chip reflects the live status too, and no extra fetch was made.
+    expect(within(panel).getByText("done")).toBeInTheDocument();
+    expect(detailGets()).toBe(before);
+  });
+
+  it("ignores deploy events for a different deploy", async () => {
+    const user = userEvent.setup();
+    const detail: DeployDetail = {
+      ...IN_PROGRESS,
+      instances: [
+        { instanceId: "i-0003", status: "updating", detail: "pulling image", updatedAt: "2026-08-03T00:00:14Z" },
+      ],
+    };
+    mock.onGet("/mgmt/deploys").reply(200, [IN_PROGRESS]);
+    mock.onGet("/mgmt/deploys/d-2").reply(200, detail);
+    renderPage();
+
+    const table = await historyTable();
+    await user.click(within(rowFor(table, "worker")).getByText("worker"));
+    const panel = await screen.findByRole("region", { name: /deploy d-2 detail/i });
+    expect(within(panel).getByText("0/1 instances converged")).toBeInTheDocument();
+
+    act(() =>
+      hub.emit("ops:deploys", {
+        event: "progress",
+        deployId: "d-OTHER",
+        instance: {
+          instanceId: "i-0003",
+          status: "converged",
+          detail: null,
+          updatedAt: "2026-08-03T00:00:20Z",
+        },
+      }),
+    );
+
+    // Unchanged — the event targeted a different deploy.
+    expect(within(panel).getByText("0/1 instances converged")).toBeInTheDocument();
   });
 
   it("switches the poll interval from 5s to 30s as the rollout settles", async () => {
@@ -194,5 +283,48 @@ describe("DeploysPage", () => {
     await user.click(retry);
     const table = await historyTable();
     await waitFor(() => expect(within(table).getByText("web")).toBeInTheDocument());
+  });
+});
+
+describe("applyDeployEvent", () => {
+  const base: DeployDetail = {
+    ...IN_PROGRESS,
+    instances: [
+      { instanceId: "i-1", status: "updating", detail: null, updatedAt: "2026-08-03T00:00:00Z" },
+    ],
+  };
+
+  it("upserts an existing instance by id", () => {
+    const next = applyDeployEvent(base, {
+      channel: "ops:deploys",
+      event: "progress",
+      instance: { instanceId: "i-1", status: "converged", detail: null, updatedAt: "t" },
+    });
+    expect(next.instances).toHaveLength(1);
+    expect(next.instances[0].status).toBe("converged");
+    expect(next).not.toBe(base);
+  });
+
+  it("appends a new instance not yet present", () => {
+    const next = applyDeployEvent(base, {
+      channel: "ops:deploys",
+      event: "progress",
+      instance: { instanceId: "i-2", status: "updating", detail: null, updatedAt: "t" },
+    });
+    expect(next.instances.map((i) => i.instanceId)).toEqual(["i-1", "i-2"]);
+  });
+
+  it("updates the overall status", () => {
+    const next = applyDeployEvent(base, {
+      channel: "ops:deploys",
+      event: "progress",
+      status: "done",
+    });
+    expect(next.status).toBe("done");
+  });
+
+  it("returns the same reference when nothing applies", () => {
+    const next = applyDeployEvent(base, { channel: "ops:deploys", event: "heartbeat" });
+    expect(next).toBe(base);
   });
 });

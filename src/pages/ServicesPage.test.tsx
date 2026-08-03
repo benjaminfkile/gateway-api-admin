@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import MockAdapter from "axios-mock-adapter";
@@ -11,20 +11,28 @@ vi.mock("../lib/cognitoClient", () => ({
   getAccessToken: () => Promise.resolve(null),
 }));
 
+// The SignalR hub is mocked wholesale — no real connection is made in tests.
+import * as hubClient from "../lib/hubClient";
+vi.mock("../lib/hubClient");
+
 import apiClient from "../api/apiClient";
 import type { ServiceSummary } from "../api/types";
 import ServicesPage from "./ServicesPage";
 import { SnackbarProvider } from "../contexts/SnackbarContext";
 import { ThemeModeProvider } from "../theme/ThemeModeProvider";
+import { installHubMock, type HubMockControl } from "../test/hubClientMock";
 
 let mock: MockAdapter;
+let hub: HubMockControl;
 
 beforeEach(() => {
   mock = new MockAdapter(apiClient);
+  hub = installHubMock(hubClient);
 });
 
 afterEach(() => {
   mock.restore();
+  vi.clearAllMocks();
   vi.useRealTimers();
 });
 
@@ -171,6 +179,22 @@ describe("ServicesPage", () => {
     });
     expect(mock.history.post[0].url).toBe("/mgmt/services/worker/stop");
     expect(mock.history.post[0].params).toBeUndefined();
+  });
+
+  it("refetches on a live fleet event and shows the live dot as fallback-free", async () => {
+    mock.onGet("/mgmt/services").reply(200, [RUNNING]);
+    renderPage();
+
+    await screen.findByText("web");
+    // Hub connected → the "live" dot is lit while polling stays as a fallback.
+    await screen.findByLabelText("live");
+
+    const gets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/services").length;
+    const before = gets();
+
+    act(() => hub.emit("ops:fleet", { event: "serviceChanged" }));
+    await waitFor(() => expect(gets()).toBe(before + 1));
   });
 
   it("renders an error state with retry that recovers", async () => {

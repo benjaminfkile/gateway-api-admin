@@ -35,9 +35,12 @@ const servicesApi = {
       .then(() => undefined);
   },
 
-  rollback(name: string): Promise<void> {
+  rollback(name: string, toDigest?: string): Promise<void> {
     return apiClient
-      .post(`${base}/${encodeURIComponent(name)}/rollback`)
+      .post(
+        `${base}/${encodeURIComponent(name)}/rollback`,
+        toDigest ? { toDigest } : undefined,
+      )
       .then(() => undefined);
   },
 

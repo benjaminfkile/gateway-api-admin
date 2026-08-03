@@ -2,9 +2,9 @@ import apiClient from "./apiClient";
 import type { DeployDetail, DeploySummary } from "./types";
 
 const deploysApi = {
-  list(): Promise<DeploySummary[]> {
+  list(params?: { service?: string }): Promise<DeploySummary[]> {
     return apiClient
-      .get<DeploySummary[]>("/mgmt/deploys")
+      .get<DeploySummary[]>("/mgmt/deploys", { params })
       .then((res) => res.data);
   },
 

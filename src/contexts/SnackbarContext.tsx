@@ -7,19 +7,30 @@ import {
   type ReactNode,
   type SyntheticEvent,
 } from "react";
-import { Alert, Snackbar, type AlertColor } from "@mui/material";
+import { Alert, Button, Snackbar, type AlertColor } from "@mui/material";
+
+/** Optional action button rendered inside a toast (e.g. "View progress"). */
+export interface SnackbarAction {
+  label: string;
+  onClick: () => void;
+}
+
+interface NotifyOptions {
+  action?: SnackbarAction;
+}
 
 interface SnackbarContextValue {
   /** Show a toast with an explicit severity. */
-  notify: (message: string, severity?: AlertColor) => void;
-  showSuccess: (message: string) => void;
-  showError: (message: string) => void;
+  notify: (message: string, severity?: AlertColor, options?: NotifyOptions) => void;
+  showSuccess: (message: string, options?: NotifyOptions) => void;
+  showError: (message: string, options?: NotifyOptions) => void;
 }
 
 interface SnackbarState {
   open: boolean;
   message: string;
   severity: AlertColor;
+  action?: SnackbarAction;
 }
 
 const SnackbarContext = createContext<SnackbarContextValue | null>(null);
@@ -36,8 +47,8 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
   });
 
   const notify = useCallback(
-    (message: string, severity: AlertColor = "info") => {
-      setState({ open: true, message, severity });
+    (message: string, severity: AlertColor = "info", options?: NotifyOptions) => {
+      setState({ open: true, message, severity, action: options?.action });
     },
     [],
   );
@@ -45,14 +56,22 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SnackbarContextValue>(
     () => ({
       notify,
-      showSuccess: (message: string) => notify(message, "success"),
-      showError: (message: string) => notify(message, "error"),
+      showSuccess: (message: string, options?: NotifyOptions) =>
+        notify(message, "success", options),
+      showError: (message: string, options?: NotifyOptions) =>
+        notify(message, "error", options),
     }),
     [notify],
   );
 
   const handleClose = (_event?: SyntheticEvent | Event, reason?: string) => {
     if (reason === "clickaway") return;
+    setState((prev) => ({ ...prev, open: false }));
+  };
+
+  const { action } = state;
+  const handleAction = () => {
+    action?.onClick();
     setState((prev) => ({ ...prev, open: false }));
   };
 
@@ -70,6 +89,13 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
           severity={state.severity}
           variant="filled"
           sx={{ width: "100%" }}
+          action={
+            action ? (
+              <Button color="inherit" size="small" onClick={handleAction}>
+                {action.label}
+              </Button>
+            ) : undefined
+          }
         >
           {state.message}
         </Alert>

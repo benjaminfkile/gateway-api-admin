@@ -11,22 +11,30 @@ vi.mock("../lib/cognitoClient", () => ({
   getAccessToken: () => Promise.resolve(null),
 }));
 
+// The SignalR hub is mocked wholesale — no real connection is made in tests.
+import * as hubClient from "../lib/hubClient";
+vi.mock("../lib/hubClient");
+
 import apiClient from "../api/apiClient";
 import type { InstanceInfo } from "../api/types";
 import InstancesPage, { summarize } from "./InstancesPage";
 import { SnackbarProvider } from "../contexts/SnackbarContext";
 import { ThemeModeProvider } from "../theme/ThemeModeProvider";
+import { installHubMock, type HubMockControl } from "../test/hubClientMock";
 
 const REFRESH_TICK = 30_000;
 
 let mock: MockAdapter;
+let hub: HubMockControl;
 
 beforeEach(() => {
   mock = new MockAdapter(apiClient);
+  hub = installHubMock(hubClient);
 });
 
 afterEach(() => {
   mock.restore();
+  vi.clearAllMocks();
   vi.useRealTimers();
 });
 
@@ -191,6 +199,21 @@ describe("InstancesPage", () => {
       await vi.advanceTimersByTimeAsync(REFRESH_TICK);
     });
     expect(listGets()).toBe(3);
+  });
+
+  it("refetches when a live fleet event arrives and lights the live dot", async () => {
+    mock.onGet("/mgmt/instances").reply(200, [FOLLOWER]);
+    renderPage();
+
+    await loadedTable("i-follower");
+    await screen.findByLabelText("live");
+
+    const gets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/instances").length;
+    const before = gets();
+
+    act(() => hub.emit("ops:fleet", { event: "instanceChanged" }));
+    await waitFor(() => expect(gets()).toBe(before + 1));
   });
 
   it("shows an error state with retry that recovers", async () => {

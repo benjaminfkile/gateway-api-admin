@@ -24,8 +24,16 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import deploysApi from "../api/deploysApi";
-import type { DeployDetail, DeployStatus, DeploySummary } from "../api/types";
+import type {
+  DeployDetail,
+  DeployInstanceResult,
+  DeployStatus,
+  DeploySummary,
+} from "../api/types";
 import { formatRelative } from "./ServicesPage";
+import type { ChannelEvent } from "../lib/hubClient";
+import { useDeployProgress } from "../hooks/useOpsChannel";
+import LiveDot from "../components/LiveDot";
 
 /** Poll fast while a rollout is mid-flight, slow once everything has settled. */
 const POLL_ACTIVE_MS = 5_000;
@@ -106,6 +114,32 @@ export function convergence(detail: DeployDetail): { converged: number; total: n
   const total = detail.instances.length;
   const converged = detail.instances.filter((i) => i.status === "converged").length;
   return { converged, total };
+}
+
+/**
+ * Fold a live "ops:deploys" progress event into an open deploy detail. An event
+ * may carry an updated per-instance result (upserted by instanceId) and/or a new
+ * overall status. Returns the same reference when nothing applies.
+ */
+export function applyDeployEvent(detail: DeployDetail, event: ChannelEvent): DeployDetail {
+  let next = detail;
+
+  const instance = event.instance as DeployInstanceResult | undefined;
+  if (instance?.instanceId) {
+    const idx = detail.instances.findIndex((i) => i.instanceId === instance.instanceId);
+    const instances =
+      idx >= 0
+        ? detail.instances.map((i, k) => (k === idx ? instance : i))
+        : [...detail.instances, instance];
+    next = { ...next, instances };
+  }
+
+  const status = event.status as DeployStatus | undefined;
+  if (status && status !== next.status) {
+    next = { ...next, status };
+  }
+
+  return next;
 }
 
 interface DeployDetailPanelProps {
@@ -326,6 +360,19 @@ export default function DeploysPage() {
     setDetailError(null);
   };
 
+  // Live deploy-progress events apply to the open drawer immediately (no
+  // refetch); the list keeps polling as a fallback. Subscribing with the open
+  // deploy's id also keeps the "live" dot lit while browsing history.
+  const onDeployEvent = useCallback((event: ChannelEvent) => {
+    setDetail((cur) => (cur ? applyDeployEvent(cur, event) : cur));
+    const status = event.status as DeployStatus | undefined;
+    if (status) {
+      setSelected((cur) => (cur ? { ...cur, status } : cur));
+    }
+  }, []);
+
+  const { connected: live } = useDeployProgress(selected?.id ?? null, onDeployEvent);
+
   const showSkeleton = loading && deploys === null;
   const showError = !loading && error !== null && deploys === null;
 
@@ -335,7 +382,10 @@ export default function DeploysPage() {
         direction="row"
         sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
       >
-        <Typography variant="h5">Deploys</Typography>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <Typography variant="h5">Deploys</Typography>
+          <LiveDot connected={live} />
+        </Stack>
         <Button
           startIcon={<RefreshIcon />}
           onClick={load}

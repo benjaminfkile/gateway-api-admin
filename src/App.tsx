@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell";
+import ErrorBoundary from "./components/ErrorBoundary";
 import RequireAuth from "./components/RequireAuth";
 import LoginPage from "./pages/LoginPage";
 import ServicesPage from "./pages/ServicesPage";
@@ -7,6 +8,7 @@ import DeploysPage from "./pages/DeploysPage";
 import InstancesPage from "./pages/InstancesPage";
 import LogsPage from "./pages/LogsPage";
 import NodeStatsPage from "./pages/NodeStatsPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
 export default function App() {
   return (
@@ -15,7 +17,9 @@ export default function App() {
       <Route
         element={
           <RequireAuth>
-            <AppShell />
+            <ErrorBoundary>
+              <AppShell />
+            </ErrorBoundary>
           </RequireAuth>
         }
       >
@@ -24,6 +28,7 @@ export default function App() {
         <Route path="/instances" element={<InstancesPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/stats" element={<NodeStatsPage />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

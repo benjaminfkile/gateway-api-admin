@@ -89,6 +89,25 @@ export async function ensureStarted(): Promise<HubConnection> {
   return conn;
 }
 
+/**
+ * Fully stop the shared connection and drop it so no further automatic reconnect
+ * attempts fire. Called on sign-out: a closed session must not keep retrying with
+ * a stale token. A subsequent ensureStarted() (after a fresh sign-in) rebuilds a
+ * new connection from scratch.
+ */
+export async function stopConnection(): Promise<void> {
+  const conn = connection;
+  connection = null;
+  startPromise = null;
+  if (conn) {
+    try {
+      await conn.stop();
+    } finally {
+      notifyState();
+    }
+  }
+}
+
 export function joinChannel(channel: string): Promise<void> {
   return getConnection().invoke("JoinChannel", channel);
 }

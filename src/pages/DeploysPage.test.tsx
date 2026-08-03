@@ -75,7 +75,14 @@ function renderPage(children: ReactNode = <DeploysPage />) {
 }
 
 async function historyTable(): Promise<HTMLElement> {
-  return screen.findByRole("table", { name: "deploy history" });
+  const table = await screen.findByRole("table", { name: "deploy history" });
+  // findByRole resolves as soon as the table element exists — which happens
+  // while it still shows loading skeletons. Wait for those to clear so callers
+  // reading data rows (rowFor) don't race the initial fetch.
+  await waitFor(() =>
+    expect(table.querySelector(".MuiSkeleton-root")).toBeNull(),
+  );
+  return table;
 }
 
 function rowFor(table: HTMLElement, text: string): HTMLElement {

@@ -7,6 +7,8 @@ import {
 } from "react";
 import * as cognito from "../lib/cognitoClient";
 import type { SignInResult } from "../lib/cognitoClient";
+import { setUnauthorizedHandler } from "../api/apiClient";
+import { stopConnection } from "../lib/hubClient";
 
 export type AuthStatus =
   | "loading"
@@ -101,8 +103,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function signOut() {
     cognito.signOut();
+    // Tear down the live hub so it stops retrying with a now-invalid token.
+    void stopConnection();
     setStatus("signedOut");
   }
+
+  // A 401 from any API call means the session is no longer valid: sign out so
+  // RequireAuth bounces the user to /login (preserving where they were). The
+  // interceptor lives outside React, so it drives sign-out through this handler.
+  useEffect(() => {
+    setUnauthorizedHandler(signOut);
+    return () => setUnauthorizedHandler(null);
+    // signOut is stable (only closes over module-level helpers and setStatus).
+
+  }, []);
 
   return (
     <AuthContext.Provider

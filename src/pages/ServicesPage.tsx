@@ -19,16 +19,23 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import { Divider } from "@mui/material";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import AddIcon from "@mui/icons-material/Add";
+import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
+import UndoIcon from "@mui/icons-material/Undo";
 import servicesApi from "../api/servicesApi";
 import type { ServiceSummary } from "../api/types";
 import { useSnackbar } from "../contexts/SnackbarContext";
 import ConfirmDialog from "../components/ConfirmDialog";
+import DeployDialog from "../components/DeployDialog";
+import RollbackDialog from "../components/RollbackDialog";
+import ServiceFormDialog from "../components/ServiceFormDialog";
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -167,6 +174,10 @@ export default function ServicesPage() {
   const [confirm, setConfirm] = useState<ConfirmConfig | null>(null);
   const [acting, setActing] = useState(false);
 
+  const [deployService, setDeployService] = useState<ServiceSummary | null>(null);
+  const [rollbackService, setRollbackService] = useState<ServiceSummary | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+
   const { showSuccess, showError } = useSnackbar();
 
   const load = useCallback(async () => {
@@ -204,6 +215,18 @@ export default function ServicesPage() {
     closeMenu();
   };
 
+  const chooseDeploy = () => {
+    if (!menuService) return;
+    setDeployService(menuService);
+    closeMenu();
+  };
+
+  const chooseRollback = () => {
+    if (!menuService) return;
+    setRollbackService(menuService);
+    closeMenu();
+  };
+
   const runAction = async () => {
     if (!confirm) return;
     const { action, service, force } = confirm;
@@ -236,14 +259,23 @@ export default function ServicesPage() {
         sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
       >
         <Typography variant="h5">Services</Typography>
-        <Button
-          startIcon={<RefreshIcon />}
-          onClick={load}
-          disabled={loading}
-          variant="outlined"
-        >
-          Refresh
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            startIcon={<AddIcon />}
+            onClick={() => setAddOpen(true)}
+            variant="contained"
+          >
+            Add service
+          </Button>
+          <Button
+            startIcon={<RefreshIcon />}
+            onClick={load}
+            disabled={loading}
+            variant="outlined"
+          >
+            Refresh
+          </Button>
+        </Stack>
       </Stack>
 
       {showError_ ? (
@@ -352,6 +384,13 @@ export default function ServicesPage() {
         <MenuItem onClick={() => chooseAction("restart")}>
           <RestartAltIcon fontSize="small" sx={{ mr: 1 }} /> Restart
         </MenuItem>
+        <Divider />
+        <MenuItem onClick={chooseDeploy}>
+          <RocketLaunchIcon fontSize="small" sx={{ mr: 1 }} /> Deploy
+        </MenuItem>
+        <MenuItem onClick={chooseRollback}>
+          <UndoIcon fontSize="small" sx={{ mr: 1 }} /> Rollback
+        </MenuItem>
       </Menu>
 
       <ConfirmDialog
@@ -365,6 +404,26 @@ export default function ServicesPage() {
         loading={acting}
         onConfirm={runAction}
         onCancel={() => setConfirm(null)}
+      />
+
+      <DeployDialog
+        open={deployService !== null}
+        service={deployService}
+        onClose={() => setDeployService(null)}
+        onDeployed={load}
+      />
+
+      <RollbackDialog
+        open={rollbackService !== null}
+        service={rollbackService}
+        onClose={() => setRollbackService(null)}
+        onRolledBack={load}
+      />
+
+      <ServiceFormDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onSaved={load}
       />
     </Box>
   );

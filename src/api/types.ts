@@ -20,7 +20,7 @@ export interface ServiceSummary {
   includeInHealth: boolean;
   updatedBy: string;
   updatedAt: string;
-  rollup: ServiceRollup;
+  fleet: ServiceRollup;
 }
 
 export interface InstanceServiceState {

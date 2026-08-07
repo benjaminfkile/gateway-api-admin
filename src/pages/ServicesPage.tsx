@@ -46,7 +46,7 @@ type ServiceAction = "start" | "stop" | "restart";
 
 /** Derive the fleet status from the running/total rollup counts. */
 export function fleetStatus(service: ServiceSummary): FleetStatus {
-  const { runningOn, totalInstances } = service.rollup;
+  const { runningOn, totalInstances } = service.fleet;
   if (runningOn <= 0) return "stopped";
   if (runningOn < totalInstances) return "partial";
   return "running";
@@ -87,7 +87,7 @@ interface ConfirmConfig {
 }
 
 function buildConfirm(action: ServiceAction, service: ServiceSummary): ConfirmConfig {
-  const total = service.rollup.totalInstances;
+  const total = service.fleet.totalInstances;
   switch (action) {
     case "start":
       return {
@@ -142,7 +142,7 @@ const ACTION_PAST: Record<ServiceAction, string> = {
 };
 
 function DigestCell({ service }: { service: ServiceSummary }) {
-  const digests = Object.keys(service.rollup.digests);
+  const digests = Object.keys(service.fleet.digests);
   const drift = digests.length > 1;
   const short = service.digest ? service.digest.slice(0, 12) : "—";
   return (
@@ -346,7 +346,7 @@ export default function ServicesPage() {
                         <Chip label={chip.label} color={chip.color} size="small" />
                       </TableCell>
                       <TableCell>
-                        {service.rollup.runningOn}/{service.rollup.totalInstances}
+                        {service.fleet.runningOn}/{service.fleet.totalInstances}
                       </TableCell>
                       <TableCell>
                         <DigestCell service={service} />

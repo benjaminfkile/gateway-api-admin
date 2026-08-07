@@ -54,7 +54,9 @@ describe("deploysApi", () => {
   });
 
   it("get() GETs /mgmt/deploys/{id} and returns the detail", async () => {
-    mock.onGet("/mgmt/deploys/d-1").reply(200, sampleDetail);
+    // The gateway nests the summary under `deploy`; get() flattens it.
+    const { instances, ...summary } = sampleDetail;
+    mock.onGet("/mgmt/deploys/d-1").reply(200, { deploy: summary, instances });
 
     const result = await deploysApi.get("d-1");
 

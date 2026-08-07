@@ -61,7 +61,7 @@ function svc(name: string): ServiceSummary {
     includeInHealth: true,
     updatedBy: "ci",
     updatedAt: "2026-08-03T00:00:00Z",
-    rollup: { runningOn: 1, totalInstances: 1, digests: {} },
+    fleet: { runningOn: 1, totalInstances: 1, digests: {} },
   };
 }
 
@@ -123,7 +123,7 @@ describe("LogsPage", () => {
   it("loads pickers and writes the initial tail into the terminal", async () => {
     mock.onGet("/mgmt/services").reply(200, SERVICES);
     mock.onGet("/mgmt/instances").reply(200, INSTANCES);
-    mock.onGet("/mgmt/services/web/logs").reply(200, [LINE_A, LINE_B]);
+    mock.onGet("/mgmt/services/web/logs").reply(200, { lines: [LINE_A, LINE_B] });
 
     renderPage();
 
@@ -147,8 +147,8 @@ describe("LogsPage", () => {
     const user = userEvent.setup();
     mock.onGet("/mgmt/services").reply(200, SERVICES);
     mock.onGet("/mgmt/instances").reply(200, INSTANCES);
-    mock.onGet("/mgmt/services/web/logs").reply(200, [LINE_A]);
-    mock.onGet("/mgmt/services/api/logs").reply(200, [LINE_C]);
+    mock.onGet("/mgmt/services/web/logs").reply(200, { lines: [LINE_A] });
+    mock.onGet("/mgmt/services/api/logs").reply(200, { lines: [LINE_C] });
 
     renderPage();
 
@@ -173,7 +173,7 @@ describe("LogsPage", () => {
     let lines: LogLine[] = [LINE_A, LINE_B];
     mock.onGet("/mgmt/services").reply(200, SERVICES);
     mock.onGet("/mgmt/instances").reply(200, INSTANCES);
-    mock.onGet("/mgmt/services/web/logs").reply(() => [200, lines]);
+    mock.onGet("/mgmt/services/web/logs").reply(() => [200, { lines }]);
 
     renderPage();
 
@@ -201,7 +201,7 @@ describe("LogsPage", () => {
     vi.useFakeTimers();
     mock.onGet("/mgmt/services").reply(200, SERVICES);
     mock.onGet("/mgmt/instances").reply(200, INSTANCES);
-    mock.onGet("/mgmt/services/web/logs").reply(200, [LINE_A]);
+    mock.onGet("/mgmt/services/web/logs").reply(200, { lines: [LINE_A] });
 
     renderPage();
     await act(async () => {
@@ -234,7 +234,7 @@ describe("LogsPage", () => {
   it("re-themes the terminal when the palette mode changes", async () => {
     mock.onGet("/mgmt/services").reply(200, SERVICES);
     mock.onGet("/mgmt/instances").reply(200, INSTANCES);
-    mock.onGet("/mgmt/services/web/logs").reply(200, [LINE_A]);
+    mock.onGet("/mgmt/services/web/logs").reply(200, { lines: [LINE_A] });
 
     renderPage(
       <>
@@ -258,7 +258,7 @@ describe("LogsPage", () => {
   it("disposes the terminal on unmount", async () => {
     mock.onGet("/mgmt/services").reply(200, SERVICES);
     mock.onGet("/mgmt/instances").reply(200, INSTANCES);
-    mock.onGet("/mgmt/services/web/logs").reply(200, [LINE_A]);
+    mock.onGet("/mgmt/services/web/logs").reply(200, { lines: [LINE_A] });
 
     const { unmount } = renderPage();
     await waitFor(() => expect(term.createTerminal).toHaveBeenCalledTimes(1));

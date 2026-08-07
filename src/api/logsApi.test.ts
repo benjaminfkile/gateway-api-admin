@@ -26,7 +26,7 @@ const sampleLines: LogLine[] = [
 
 describe("logsApi", () => {
   it("tail() GETs the service logs with instance and tail params", async () => {
-    mock.onGet("/mgmt/services/web/logs").reply(200, sampleLines);
+    mock.onGet("/mgmt/services/web/logs").reply(200, { lines: sampleLines });
 
     const result = await logsApi.tail("web", "i-0abc", 200);
 

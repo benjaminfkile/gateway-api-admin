@@ -3,12 +3,13 @@ import type { LogLine } from "./types";
 
 const logsApi = {
   tail(name: string, instanceId: string, tail: number): Promise<LogLine[]> {
+    // The gateway wraps the lines: { lines: [{ ts, message }] }.
     return apiClient
-      .get<LogLine[]>(
+      .get<{ lines: LogLine[] }>(
         `/mgmt/services/${encodeURIComponent(name)}/logs`,
         { params: { instance: instanceId, tail } },
       )
-      .then((res) => res.data);
+      .then((res) => res.data.lines);
   },
 };
 

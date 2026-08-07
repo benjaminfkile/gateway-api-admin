@@ -33,7 +33,7 @@ const service: ServiceSummary = {
   includeInHealth: false,
   updatedBy: "alice",
   updatedAt: "2026-08-03T00:00:00Z",
-  rollup: { runningOn: 2, totalInstances: 2, digests: { "sha256:current0000": 2 } },
+  fleet: { runningOn: 2, totalInstances: 2, digests: { "sha256:current0000": 2 } },
 };
 
 function deploy(overrides: Partial<DeploySummary>): DeploySummary {

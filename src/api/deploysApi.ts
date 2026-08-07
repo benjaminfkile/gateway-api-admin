@@ -9,9 +9,13 @@ const deploysApi = {
   },
 
   get(id: string): Promise<DeployDetail> {
+    // The gateway nests the summary under `deploy` with `instances` alongside;
+    // flatten to the DeployDetail shape the pages consume.
     return apiClient
-      .get<DeployDetail>(`/mgmt/deploys/${encodeURIComponent(id)}`)
-      .then((res) => res.data);
+      .get<{ deploy: DeploySummary; instances: DeployDetail["instances"] }>(
+        `/mgmt/deploys/${encodeURIComponent(id)}`,
+      )
+      .then((res) => ({ ...res.data.deploy, instances: res.data.instances }));
   },
 };
 

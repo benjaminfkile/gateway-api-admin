@@ -35,7 +35,7 @@ const service: ServiceSummary = {
   includeInHealth: true,
   updatedBy: "alice",
   updatedAt: "2026-08-03T00:00:00Z",
-  rollup: { runningOn: 3, totalInstances: 3, digests: { "sha256:abcdef0123456789": 3 } },
+  fleet: { runningOn: 3, totalInstances: 3, digests: { "sha256:abcdef0123456789": 3 } },
 };
 
 function renderDialog() {

@@ -31,7 +31,7 @@ const sampleService: ServiceSummary = {
   includeInHealth: true,
   updatedBy: "alice",
   updatedAt: "2026-08-03T00:00:00Z",
-  rollup: { runningOn: 2, totalInstances: 3, digests: { "sha256:abc": 2 } },
+  fleet: { runningOn: 2, totalInstances: 3, digests: { "sha256:abc": 2 } },
 };
 
 describe("servicesApi", () => {

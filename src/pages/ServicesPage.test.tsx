@@ -47,7 +47,7 @@ function svc(overrides: Partial<ServiceSummary> = {}): ServiceSummary {
     includeInHealth: true,
     updatedBy: "alice",
     updatedAt: "2026-08-03T00:00:00Z",
-    rollup: { runningOn: 3, totalInstances: 3, digests: { "sha256:abcdef0123456789": 3 } },
+    fleet: { runningOn: 3, totalInstances: 3, digests: { "sha256:abcdef0123456789": 3 } },
     ...overrides,
   };
 }
@@ -56,12 +56,12 @@ const RUNNING = svc({ name: "web" });
 const STOPPED = svc({
   name: "worker",
   includeInHealth: false,
-  rollup: { runningOn: 0, totalInstances: 2, digests: {} },
+  fleet: { runningOn: 0, totalInstances: 2, digests: {} },
 });
 const PARTIAL = svc({
   name: "cache",
   includeInHealth: false,
-  rollup: {
+  fleet: {
     runningOn: 2,
     totalInstances: 3,
     digests: { "sha256:aaaaaaaaaaaa": 1, "sha256:bbbbbbbbbbbb": 1 },

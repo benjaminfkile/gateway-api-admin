@@ -13,7 +13,7 @@ import {
   TextField,
 } from "@mui/material";
 import servicesApi from "../api/servicesApi";
-import type { DesiredStatus, ServiceUpsert } from "../api/types";
+import type { DesiredStatus, ServiceSummary, ServiceUpsert } from "../api/types";
 import { useSnackbar } from "../contexts/SnackbarContext";
 
 export interface ServiceFormDialogProps {
@@ -21,6 +21,11 @@ export interface ServiceFormDialogProps {
   onClose: () => void;
   /** Called after a successful upsert so the caller can refresh the fleet. */
   onSaved?: () => void;
+  /**
+   * When provided, the dialog edits this existing service: its fields are
+   * prefilled and the name (the primary key / route prefix) is read-only.
+   */
+  service?: ServiceSummary | null;
 }
 
 export const NAME_PATTERN = /^[a-z0-9-]+$/;
@@ -84,6 +89,7 @@ export default function ServiceFormDialog({
   open,
   onClose,
   onSaved,
+  service,
 }: ServiceFormDialogProps) {
   const [form, setForm] = useState<FormState>(INITIAL);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -91,14 +97,27 @@ export default function ServiceFormDialog({
   const [apiError, setApiError] = useState<string | null>(null);
   const { showSuccess } = useSnackbar();
 
+  const isEdit = Boolean(service);
+
   useEffect(() => {
     if (open) {
-      setForm(INITIAL);
+      setForm(
+        service
+          ? {
+              name: service.name,
+              image: service.image,
+              tag: service.tag,
+              port: String(service.port),
+              includeInHealth: service.includeInHealth,
+              desiredStatus: service.desiredStatus,
+            }
+          : INITIAL,
+      );
       setErrors({});
       setBusy(false);
       setApiError(null);
     }
-  }, [open]);
+  }, [open, service]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -139,7 +158,7 @@ export default function ServiceFormDialog({
       maxWidth="sm"
       fullWidth
     >
-      <DialogTitle>Add service</DialogTitle>
+      <DialogTitle>{isEdit ? "Edit service" : "Add service"}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <TextField
@@ -147,10 +166,16 @@ export default function ServiceFormDialog({
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
             error={Boolean(errors.name)}
-            helperText={errors.name ?? "Lowercase letters, digits and dashes"}
+            helperText={
+              errors.name ??
+              (isEdit
+                ? "Name is the primary key and cannot be changed"
+                : "Lowercase letters, digits and dashes")
+            }
             disabled={busy}
             fullWidth
-            autoFocus
+            autoFocus={!isEdit}
+            slotProps={isEdit ? { input: { readOnly: true } } : undefined}
           />
           <TextField
             label="Image"
@@ -160,6 +185,7 @@ export default function ServiceFormDialog({
             helperText={errors.image}
             disabled={busy}
             fullWidth
+            autoFocus={isEdit}
           />
           <TextField
             label="Tag"

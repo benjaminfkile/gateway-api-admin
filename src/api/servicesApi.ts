@@ -52,6 +52,14 @@ const servicesApi = {
       )
       .then((res) => res.data);
   },
+
+  remove(name: string, force?: boolean): Promise<void> {
+    return apiClient
+      .delete(`${base}/${encodeURIComponent(name)}`, {
+        params: force ? { force: true } : undefined,
+      })
+      .then(() => undefined);
+  },
 };
 
 export default servicesApi;

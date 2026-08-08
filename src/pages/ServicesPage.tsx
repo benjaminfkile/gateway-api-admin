@@ -29,6 +29,8 @@ import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import AddIcon from "@mui/icons-material/Add";
 import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
 import UndoIcon from "@mui/icons-material/Undo";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import servicesApi from "../api/servicesApi";
 import type { ServiceSummary } from "../api/types";
 import { useSnackbar } from "../contexts/SnackbarContext";
@@ -36,6 +38,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import DeployDialog from "../components/DeployDialog";
 import RollbackDialog from "../components/RollbackDialog";
 import ServiceFormDialog from "../components/ServiceFormDialog";
+import RemoveServiceDialog from "../components/RemoveServiceDialog";
 import LiveDot from "../components/LiveDot";
 import { useFleetStatus } from "../hooks/useOpsChannel";
 
@@ -178,6 +181,8 @@ export default function ServicesPage() {
 
   const [deployService, setDeployService] = useState<ServiceSummary | null>(null);
   const [rollbackService, setRollbackService] = useState<ServiceSummary | null>(null);
+  const [editService, setEditService] = useState<ServiceSummary | null>(null);
+  const [removeService, setRemoveService] = useState<ServiceSummary | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
   const { showSuccess, showError } = useSnackbar();
@@ -230,6 +235,18 @@ export default function ServicesPage() {
   const chooseRollback = () => {
     if (!menuService) return;
     setRollbackService(menuService);
+    closeMenu();
+  };
+
+  const chooseEdit = () => {
+    if (!menuService) return;
+    setEditService(menuService);
+    closeMenu();
+  };
+
+  const chooseRemove = () => {
+    if (!menuService) return;
+    setRemoveService(menuService);
     closeMenu();
   };
 
@@ -420,6 +437,13 @@ export default function ServicesPage() {
         <MenuItem onClick={chooseRollback}>
           <UndoIcon fontSize="small" sx={{ mr: 1 }} /> Rollback
         </MenuItem>
+        <Divider />
+        <MenuItem onClick={chooseEdit}>
+          <EditIcon fontSize="small" sx={{ mr: 1 }} /> Edit
+        </MenuItem>
+        <MenuItem onClick={chooseRemove}>
+          <DeleteOutlineIcon fontSize="small" sx={{ mr: 1 }} /> Remove
+        </MenuItem>
       </Menu>
 
       <ConfirmDialog
@@ -453,6 +477,20 @@ export default function ServicesPage() {
         open={addOpen}
         onClose={() => setAddOpen(false)}
         onSaved={load}
+      />
+
+      <ServiceFormDialog
+        open={editService !== null}
+        service={editService}
+        onClose={() => setEditService(null)}
+        onSaved={load}
+      />
+
+      <RemoveServiceDialog
+        open={removeService !== null}
+        service={removeService}
+        onClose={() => setRemoveService(null)}
+        onRemoved={load}
       />
     </Box>
   );

@@ -57,6 +57,7 @@ function svc(name: string): ServiceSummary {
     tag: "latest",
     digest: "sha256:abc",
     port: 8080,
+    hostPort: 49213,
     desiredStatus: "running",
     includeInHealth: true,
     updatedBy: "ci",

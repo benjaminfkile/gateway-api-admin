@@ -16,6 +16,8 @@ export interface ServiceSummary {
   tag: string;
   digest: string | null;
   port: number;
+  /** Docker-assigned (ephemeral) host port the container is bound to, or null when no container is running. */
+  hostPort: number | null;
   desiredStatus: DesiredStatus;
   includeInHealth: boolean;
   updatedBy: string;

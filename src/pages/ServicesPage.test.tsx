@@ -43,6 +43,7 @@ function svc(overrides: Partial<ServiceSummary> = {}): ServiceSummary {
     tag: "v1.2.3",
     digest: "sha256:abcdef0123456789",
     port: 8080,
+    hostPort: 49213,
     desiredStatus: "running",
     includeInHealth: true,
     updatedBy: "alice",
@@ -56,6 +57,7 @@ const RUNNING = svc({ name: "web" });
 const STOPPED = svc({
   name: "worker",
   includeInHealth: false,
+  hostPort: null,
   fleet: { runningOn: 0, totalInstances: 2, digests: {} },
 });
 const PARTIAL = svc({
@@ -112,6 +114,15 @@ describe("ServicesPage", () => {
     await screen.findByText("cache");
     expect(within(rowFor("cache")).getByLabelText("digest drift")).toBeInTheDocument();
     expect(within(rowFor("web")).queryByLabelText("digest drift")).toBeNull();
+  });
+
+  it("shows the container port with its host port, dashing when unbound", async () => {
+    mock.onGet("/mgmt/services").reply(200, [RUNNING, STOPPED]);
+    renderPage();
+
+    await screen.findByText("web");
+    expect(within(rowFor("web")).getByText("→ host 49213")).toBeInTheDocument();
+    expect(within(rowFor("worker")).getByText("→ host —")).toBeInTheDocument();
   });
 
   it("confirm flow fires the correct api call", async () => {

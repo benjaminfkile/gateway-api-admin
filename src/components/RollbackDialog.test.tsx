@@ -29,6 +29,7 @@ const service: ServiceSummary = {
   tag: "v3",
   digest: "sha256:current0000",
   port: 8080,
+  hostPort: 49213,
   desiredStatus: "running",
   includeInHealth: false,
   updatedBy: "alice",

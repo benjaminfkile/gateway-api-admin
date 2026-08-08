@@ -352,7 +352,27 @@ export default function ServicesPage() {
                         <DigestCell service={service} />
                       </TableCell>
                       <TableCell>{service.tag}</TableCell>
-                      <TableCell align="right">{service.port}</TableCell>
+                      <TableCell align="right">
+                        <Tooltip
+                          title={
+                            service.hostPort === null
+                              ? "No running container on the instance"
+                              : `Container port ${service.port} is bound to host port ${service.hostPort}`
+                          }
+                        >
+                          <Typography component="span" variant="body2">
+                            {service.port}
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ ml: 0.5 }}
+                            >
+                              → host {service.hostPort ?? "—"}
+                            </Typography>
+                          </Typography>
+                        </Tooltip>
+                      </TableCell>
                       <TableCell>
                         <Tooltip
                           title={`by ${service.updatedBy} · ${new Date(

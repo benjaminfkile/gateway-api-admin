@@ -19,6 +19,7 @@ import {
 import RefreshIcon from "@mui/icons-material/Refresh";
 import StarIcon from "@mui/icons-material/Star";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import instancesApi from "../api/instancesApi";
 import type { InstanceInfo } from "../api/types";
 import { formatRelative } from "./ServicesPage";
@@ -98,25 +99,51 @@ function ServicesCell({ instance }: { instance: InstanceInfo }) {
   if (services.length === 0) {
     return <Typography color="text.secondary">0</Typography>;
   }
+  const errored = services.filter((s) => s.lastError);
   const tip = (
-    <Stack spacing={0.25}>
+    <Stack spacing={0.5}>
       {services.map((s) => (
-        <Typography
-          key={s.name}
-          variant="caption"
-          component="span"
-          sx={{ fontFamily: "monospace" }}
-        >
-          {s.name}@{shortDigest(s.digest)}
-        </Typography>
+        <Stack key={s.name} spacing={0.25}>
+          <Typography
+            variant="caption"
+            component="span"
+            sx={{ fontFamily: "monospace" }}
+          >
+            {s.name}@{shortDigest(s.digest)}
+          </Typography>
+          {s.lastError && (
+            <Typography
+              variant="caption"
+              component="span"
+              sx={{ color: "warning.light" }}
+            >
+              ⚠ {s.lastError}
+              {s.lastErrorAt ? ` · ${formatRelative(s.lastErrorAt)}` : ""}
+            </Typography>
+          )}
+        </Stack>
       ))}
     </Stack>
   );
   return (
     <Tooltip title={tip}>
-      <Typography component="span" sx={{ cursor: "default" }}>
-        {services.length}
-      </Typography>
+      <Stack
+        direction="row"
+        spacing={0.5}
+        component="span"
+        sx={{ alignItems: "center", justifyContent: "flex-end", cursor: "default" }}
+      >
+        {errored.length > 0 && (
+          <ErrorOutlineIcon
+            color="warning"
+            fontSize="small"
+            aria-label={`${errored.length} service${
+              errored.length === 1 ? "" : "s"
+            } with a reconcile error`}
+          />
+        )}
+        <Typography component="span">{services.length}</Typography>
+      </Stack>
     </Tooltip>
   );
 }

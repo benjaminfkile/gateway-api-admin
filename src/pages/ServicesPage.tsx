@@ -23,6 +23,7 @@ import { Divider } from "@mui/material";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
@@ -165,6 +166,41 @@ function DigestCell({ service }: { service: ServiceSummary }) {
         </Tooltip>
       )}
     </Stack>
+  );
+}
+
+/**
+ * Warning indicator shown next to the status chip when one or more instances
+ * are reporting a reconcile error. Renders nothing when the fleet is clean or
+ * when the gateway is too old to report the `errorOn` field.
+ */
+function ReconcileErrorIndicator({ service }: { service: ServiceSummary }) {
+  const { errorOn, latestError } = service.fleet;
+  if (!errorOn || errorOn <= 0) return null;
+  const instances = `${errorOn} instance${errorOn === 1 ? "" : "s"}`;
+  const tip = latestError ? (
+    <Stack spacing={0.25}>
+      <Typography variant="caption" component="span">
+        {latestError.message}
+      </Typography>
+      <Typography variant="caption" component="span" color="text.secondary">
+        {latestError.instanceId} · {formatRelative(latestError.at)}
+      </Typography>
+      <Typography variant="caption" component="span" color="text.secondary">
+        {`${errorOn} instance${errorOn === 1 ? "" : "s"} affected`}
+      </Typography>
+    </Stack>
+  ) : (
+    `Reconcile error on ${instances}`
+  );
+  return (
+    <Tooltip title={tip}>
+      <ErrorOutlineIcon
+        color="warning"
+        fontSize="small"
+        aria-label={`reconcile error on ${instances}`}
+      />
+    </Tooltip>
   );
 }
 
@@ -360,7 +396,14 @@ export default function ServicesPage() {
                     <TableRow key={service.name} hover>
                       <TableCell>{service.name}</TableCell>
                       <TableCell>
-                        <Chip label={chip.label} color={chip.color} size="small" />
+                        <Stack
+                          direction="row"
+                          spacing={0.5}
+                          sx={{ alignItems: "center" }}
+                        >
+                          <Chip label={chip.label} color={chip.color} size="small" />
+                          <ReconcileErrorIndicator service={service} />
+                        </Stack>
                       </TableCell>
                       <TableCell>
                         {service.fleet.runningOn}/{service.fleet.totalInstances}

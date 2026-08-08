@@ -3,11 +3,22 @@
 
 export type DesiredStatus = "running" | "stopped";
 
+/** The most recent reconcile error surfaced by the fleet rollup. */
+export interface ServiceLatestError {
+  instanceId: string;
+  message: string;
+  at: string;
+}
+
 export interface ServiceRollup {
   runningOn: number;
   totalInstances: number;
   /** Map of image digest -> number of instances currently running it. */
   digests: Record<string, number>;
+  /** Number of instances currently reporting a reconcile error. Absent on older gateways. */
+  errorOn?: number;
+  /** Details of the most recent reconcile error across the fleet. Absent on older gateways. */
+  latestError?: ServiceLatestError;
 }
 
 export interface ServiceSummary {
@@ -31,6 +42,10 @@ export interface InstanceServiceState {
   state: string;
   startedAt: string;
   restarts: number;
+  /** Latest reconcile error for this service on this instance. Absent on older gateways or when healthy. */
+  lastError?: string;
+  /** When the last error was recorded. Absent on older gateways or when healthy. */
+  lastErrorAt?: string;
 }
 
 export interface InstanceInfo {

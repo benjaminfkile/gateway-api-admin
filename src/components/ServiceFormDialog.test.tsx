@@ -79,6 +79,52 @@ describe("ServiceFormDialog", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  it("renders the env secret ref field with its helper text", () => {
+    renderDialog();
+
+    expect(screen.getByLabelText(/env secret ref/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/AWS Secrets Manager secret name or ARN/i),
+    ).toBeInTheDocument();
+  });
+
+  it("includes envSecretRef in the payload when set", async () => {
+    const user = userEvent.setup();
+    mock.onPut("/mgmt/services/api").reply(200, {});
+    renderDialog();
+
+    await user.type(screen.getByLabelText(/name/i), "api");
+    await user.type(screen.getByLabelText(/image/i), "registry/api");
+    await user.type(
+      screen.getByLabelText(/env secret ref/i),
+      "prod/api/env",
+    );
+
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(mock.history.put).toHaveLength(1));
+    expect(JSON.parse(mock.history.put[0].data)).toMatchObject({
+      name: "api",
+      envSecretRef: "prod/api/env",
+    });
+  });
+
+  it("omits envSecretRef from the payload when left blank", async () => {
+    const user = userEvent.setup();
+    mock.onPut("/mgmt/services/api").reply(200, {});
+    renderDialog();
+
+    await user.type(screen.getByLabelText(/name/i), "api");
+    await user.type(screen.getByLabelText(/image/i), "registry/api");
+
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(mock.history.put).toHaveLength(1));
+    expect(JSON.parse(mock.history.put[0].data)).not.toHaveProperty(
+      "envSecretRef",
+    );
+  });
+
   it("blocks submit and shows validation errors for a bad name and port", async () => {
     const user = userEvent.setup();
     renderDialog();
@@ -158,6 +204,36 @@ describe("ServiceFormDialog", () => {
         desiredStatus: "running",
       });
       await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+
+    it("prefills the env secret ref and resends it when unchanged", async () => {
+      const user = userEvent.setup();
+      mock.onPut("/mgmt/services/web").reply(200, {});
+      renderDialog(vi.fn(), { ...existingService, envSecretRef: "prod/web/env" });
+
+      expect(screen.getByLabelText(/env secret ref/i)).toHaveValue("prod/web/env");
+
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(mock.history.put).toHaveLength(1));
+      expect(JSON.parse(mock.history.put[0].data)).toMatchObject({
+        name: "web",
+        envSecretRef: "prod/web/env",
+      });
+    });
+
+    it("omits the env secret ref when cleared in edit mode", async () => {
+      const user = userEvent.setup();
+      mock.onPut("/mgmt/services/web").reply(200, {});
+      renderDialog(vi.fn(), { ...existingService, envSecretRef: "prod/web/env" });
+
+      await user.clear(screen.getByLabelText(/env secret ref/i));
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(mock.history.put).toHaveLength(1));
+      expect(JSON.parse(mock.history.put[0].data)).not.toHaveProperty(
+        "envSecretRef",
+      );
     });
   });
 });

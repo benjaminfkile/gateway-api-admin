@@ -31,6 +31,12 @@ export interface ServiceSummary {
   hostPort: number | null;
   desiredStatus: DesiredStatus;
   includeInHealth: boolean;
+  /**
+   * AWS Secrets Manager secret name or ARN whose flat JSON keys become the
+   * container environment. Null/absent when the service has no injected env.
+   * This is only the reference — never the secret values.
+   */
+  envSecretRef?: string | null;
   updatedBy: string;
   updatedAt: string;
   fleet: ServiceRollup;
@@ -97,4 +103,9 @@ export interface ServiceUpsert {
   port: number;
   desiredStatus?: DesiredStatus;
   includeInHealth?: boolean;
+  /**
+   * AWS Secrets Manager secret name or ARN for injected container env. Omit to
+   * leave an existing ref untouched; only the reference is sent, never values.
+   */
+  envSecretRef?: string | null;
 }

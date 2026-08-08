@@ -8,6 +8,7 @@ vi.mock("../lib/cognitoClient", () => ({
 }));
 
 import apiClient from "../api/apiClient";
+import type { ServiceSummary } from "../api/types";
 import ServiceFormDialog from "./ServiceFormDialog";
 import { SnackbarProvider } from "../contexts/SnackbarContext";
 import { ThemeModeProvider } from "../theme/ThemeModeProvider";
@@ -22,11 +23,25 @@ afterEach(() => {
   mock.restore();
 });
 
-function renderDialog(onClose = vi.fn()) {
+const existingService: ServiceSummary = {
+  name: "web",
+  image: "registry/web",
+  tag: "v1.2.3",
+  digest: "sha256:abc",
+  port: 8080,
+  hostPort: 49213,
+  desiredStatus: "running",
+  includeInHealth: true,
+  updatedBy: "alice",
+  updatedAt: "2026-08-03T00:00:00Z",
+  fleet: { runningOn: 2, totalInstances: 3, digests: { "sha256:abc": 2 } },
+};
+
+function renderDialog(onClose = vi.fn(), service?: ServiceSummary) {
   render(
     <ThemeModeProvider>
       <SnackbarProvider>
-        <ServiceFormDialog open onClose={onClose} />
+        <ServiceFormDialog open onClose={onClose} service={service} />
       </SnackbarProvider>
     </ThemeModeProvider>,
   );
@@ -103,5 +118,46 @@ describe("ServiceFormDialog", () => {
 
     expect(await screen.findByText(/already exists/i)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  describe("edit mode", () => {
+    it("prefills the form from the service and renders the name read-only", () => {
+      renderDialog(vi.fn(), existingService);
+
+      expect(screen.getByRole("heading", { name: /edit service/i })).toBeInTheDocument();
+
+      const name = screen.getByLabelText(/name/i);
+      expect(name).toHaveValue("web");
+      expect(name).toHaveAttribute("readonly");
+
+      expect(screen.getByLabelText(/image/i)).toHaveValue("registry/web");
+      expect(screen.getByLabelText(/tag/i)).toHaveValue("v1.2.3");
+      expect(screen.getByLabelText(/port/i)).toHaveValue("8080");
+      expect(screen.getByRole("switch", { name: /include in health/i })).toBeChecked();
+    });
+
+    it("PUTs the edited values without changing the name", async () => {
+      const user = userEvent.setup();
+      mock.onPut("/mgmt/services/web").reply(200, {});
+      const onClose = renderDialog(vi.fn(), existingService);
+
+      const tag = screen.getByLabelText(/tag/i);
+      await user.clear(tag);
+      await user.type(tag, "v2");
+
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(mock.history.put).toHaveLength(1));
+      expect(mock.history.put[0].url).toBe("/mgmt/services/web");
+      expect(JSON.parse(mock.history.put[0].data)).toEqual({
+        name: "web",
+        image: "registry/web",
+        tag: "v2",
+        port: 8080,
+        includeInHealth: true,
+        desiredStatus: "running",
+      });
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
   });
 });

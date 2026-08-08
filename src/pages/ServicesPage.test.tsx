@@ -208,6 +208,56 @@ describe("ServicesPage", () => {
     await waitFor(() => expect(gets()).toBe(before + 1));
   });
 
+  it("opens the edit dialog prefilled and PUTs the update", async () => {
+    const user = userEvent.setup();
+    mock.onGet("/mgmt/services").reply(200, [RUNNING]);
+    mock.onPut("/mgmt/services/web").reply(200, {});
+    renderPage();
+
+    await screen.findByText("web");
+    await user.click(screen.getByLabelText("actions for web"));
+    await user.click(await screen.findByRole("menuitem", { name: /edit/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    // Prefilled with the current values and a read-only name.
+    const name = within(dialog).getByLabelText(/name/i);
+    expect(name).toHaveValue("web");
+    expect(name).toHaveAttribute("readonly");
+    expect(within(dialog).getByLabelText(/image/i)).toHaveValue("registry/web");
+
+    const tag = within(dialog).getByLabelText(/tag/i);
+    await user.clear(tag);
+    await user.type(tag, "v2");
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(mock.history.put).toHaveLength(1));
+    expect(mock.history.put[0].url).toBe("/mgmt/services/web");
+    expect(JSON.parse(mock.history.put[0].data).tag).toBe("v2");
+  });
+
+  it("removes a service after typing its name to confirm", async () => {
+    const user = userEvent.setup();
+    mock.onGet("/mgmt/services").reply(200, [STOPPED]);
+    mock.onDelete("/mgmt/services/worker").reply(204);
+    renderPage();
+
+    await screen.findByText("worker");
+    await user.click(screen.getByLabelText("actions for worker"));
+    await user.click(await screen.findByRole("menuitem", { name: /remove/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    const confirmBtn = within(dialog).getByRole("button", { name: /^remove$/i });
+    expect(confirmBtn).toBeDisabled();
+
+    await user.type(within(dialog).getByLabelText(/service name/i), "worker");
+    expect(confirmBtn).toBeEnabled();
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(mock.history.delete).toHaveLength(1));
+    expect(mock.history.delete[0].url).toBe("/mgmt/services/worker");
+    expect(mock.history.delete[0].params).toBeUndefined();
+  });
+
   it("renders an error state with retry that recovers", async () => {
     const user = userEvent.setup();
     mock.onGet("/mgmt/services").replyOnce(500);

@@ -113,6 +113,33 @@ describe("servicesApi", () => {
     expect(JSON.parse(mock.history.put[0].data)).toEqual(payload);
   });
 
+  it("remove() DELETEs /mgmt/services/{name} without force by default", async () => {
+    mock.onDelete("/mgmt/services/web").reply(204);
+
+    await servicesApi.remove("web");
+
+    expect(mock.history.delete).toHaveLength(1);
+    expect(mock.history.delete[0].url).toBe("/mgmt/services/web");
+    expect(mock.history.delete[0].params).toBeUndefined();
+  });
+
+  it("remove() passes force=true as a query param", async () => {
+    mock.onDelete("/mgmt/services/web").reply(204);
+
+    await servicesApi.remove("web", true);
+
+    expect(mock.history.delete[0].url).toBe("/mgmt/services/web");
+    expect(mock.history.delete[0].params).toEqual({ force: true });
+  });
+
+  it("remove() encodes special characters in the name", async () => {
+    mock.onDelete("/mgmt/services/my%2Fsvc").reply(204);
+
+    await servicesApi.remove("my/svc");
+
+    expect(mock.history.delete[0].url).toBe("/mgmt/services/my%2Fsvc");
+  });
+
   it("encodes service names with special characters", async () => {
     mock.onPost("/mgmt/services/my%2Fsvc/start").reply(204);
 

@@ -69,6 +69,20 @@ const PARTIAL = svc({
     digests: { "sha256:aaaaaaaaaaaa": 1, "sha256:bbbbbbbbbbbb": 1 },
   },
 });
+const ERRORED = svc({
+  name: "api",
+  fleet: {
+    runningOn: 3,
+    totalInstances: 3,
+    digests: { "sha256:abcdef0123456789": 3 },
+    errorOn: 2,
+    latestError: {
+      instanceId: "i-0badcafe",
+      message: "image pull failed: unauthorized",
+      at: "2026-08-08T00:00:00Z",
+    },
+  },
+});
 
 function renderPage(children: ReactNode = <ServicesPage />) {
   return render(
@@ -123,6 +137,35 @@ describe("ServicesPage", () => {
     await screen.findByText("web");
     expect(within(rowFor("web")).getByText("→ host 49213")).toBeInTheDocument();
     expect(within(rowFor("worker")).getByText("→ host —")).toBeInTheDocument();
+  });
+
+  it("shows a reconcile-error indicator only when errorOn > 0", async () => {
+    mock.onGet("/mgmt/services").reply(200, [RUNNING, ERRORED]);
+    renderPage();
+
+    await screen.findByText("api");
+    expect(
+      within(rowFor("api")).getByLabelText(/reconcile error on 2 instances/i),
+    ).toBeInTheDocument();
+    // A clean fleet (and old-gateway fixtures without the field) render no icon.
+    expect(
+      within(rowFor("web")).queryByLabelText(/reconcile error/i),
+    ).toBeNull();
+  });
+
+  it("shows the latest error details in the indicator tooltip", async () => {
+    const user = userEvent.setup();
+    mock.onGet("/mgmt/services").reply(200, [ERRORED]);
+    renderPage();
+
+    await screen.findByText("api");
+    await user.hover(
+      within(rowFor("api")).getByLabelText(/reconcile error on 2 instances/i),
+    );
+    expect(
+      await screen.findByText("image pull failed: unauthorized"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/i-0badcafe/)).toBeInTheDocument();
   });
 
   it("confirm flow fires the correct api call", async () => {

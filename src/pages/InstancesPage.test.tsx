@@ -68,6 +68,20 @@ const STALE = inst({
   gatewayVer: "1.3.0",
   heartbeatAt: "2026-08-02T00:00:00Z",
 });
+const WITH_ERROR = inst({
+  instanceId: "i-error",
+  services: [
+    {
+      name: "web",
+      digest: "sha256:abcdef0123456789",
+      state: "error",
+      startedAt: "2026-08-03T00:00:00Z",
+      restarts: 3,
+      lastError: "container exited: code 1",
+      lastErrorAt: "2026-08-08T00:00:00Z",
+    },
+  ],
+});
 
 function renderPage(children: ReactNode = <InstancesPage />) {
   return render(
@@ -152,6 +166,33 @@ describe("InstancesPage", () => {
     const table = await loadedTable("i-follower");
     await user.hover(within(rowFor(table, "i-follower")).getByText("1"));
     expect(await screen.findByText("web@sha256:abcde")).toBeInTheDocument();
+  });
+
+  it("surfaces a service's lastError with an icon and in the tooltip", async () => {
+    const user = userEvent.setup();
+    mock.onGet("/mgmt/instances").reply(200, [WITH_ERROR]);
+    renderPage();
+
+    const table = await loadedTable("i-error");
+    const row = rowFor(table, "i-error");
+    expect(
+      within(row).getByLabelText(/1 service with a reconcile error/i),
+    ).toBeInTheDocument();
+
+    await user.hover(within(row).getByText("1"));
+    expect(
+      await screen.findByText(/container exited: code 1/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders cleanly when services carry no lastError (old gateway)", async () => {
+    mock.onGet("/mgmt/instances").reply(200, [FOLLOWER]);
+    renderPage();
+
+    const table = await loadedTable("i-follower");
+    expect(
+      within(rowFor(table, "i-follower")).queryByLabelText(/reconcile error/i),
+    ).toBeNull();
   });
 
   it("computes summary math and warns on mixed gateway versions", async () => {

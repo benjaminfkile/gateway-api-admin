@@ -394,7 +394,27 @@ export default function ServicesPage() {
                   const chip = STATUS_CHIP[status];
                   return (
                     <TableRow key={service.name} hover>
-                      <TableCell>{service.name}</TableCell>
+                      <TableCell>
+                        <Stack
+                          direction="row"
+                          spacing={0.5}
+                          sx={{ alignItems: "center" }}
+                        >
+                          <span>{service.name}</span>
+                          {service.envSecretRef && (
+                            <Tooltip
+                              title={`Injected env from secret: ${service.envSecretRef}`}
+                            >
+                              <Chip
+                                label="env"
+                                size="small"
+                                variant="outlined"
+                                aria-label={`env secret ${service.envSecretRef}`}
+                              />
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </TableCell>
                       <TableCell>
                         <Stack
                           direction="row"

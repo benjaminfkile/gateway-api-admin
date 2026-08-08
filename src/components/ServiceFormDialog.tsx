@@ -37,6 +37,7 @@ interface FormState {
   port: string;
   includeInHealth: boolean;
   desiredStatus: DesiredStatus;
+  envSecretRef: string;
 }
 
 const INITIAL: FormState = {
@@ -46,6 +47,7 @@ const INITIAL: FormState = {
   port: "8080",
   includeInHealth: false,
   desiredStatus: "running",
+  envSecretRef: "",
 };
 
 type FieldErrors = Partial<Record<"name" | "image" | "tag" | "port", string>>;
@@ -110,6 +112,7 @@ export default function ServiceFormDialog({
               port: String(service.port),
               includeInHealth: service.includeInHealth,
               desiredStatus: service.desiredStatus,
+              envSecretRef: service.envSecretRef ?? "",
             }
           : INITIAL,
       );
@@ -136,6 +139,13 @@ export default function ServiceFormDialog({
       includeInHealth: form.includeInHealth,
       desiredStatus: form.desiredStatus,
     };
+
+    // Only send the ref when set, so submitting a blank field never overwrites
+    // an existing secret ref with junk. Send only the reference, never values.
+    const envSecretRef = form.envSecretRef.trim();
+    if (envSecretRef) {
+      payload.envSecretRef = envSecretRef;
+    }
 
     setBusy(true);
     setApiError(null);
@@ -205,6 +215,14 @@ export default function ServiceFormDialog({
             disabled={busy}
             fullWidth
             slotProps={{ htmlInput: { inputMode: "numeric" } }}
+          />
+          <TextField
+            label="Env secret ref"
+            value={form.envSecretRef}
+            onChange={(e) => set("envSecretRef", e.target.value)}
+            helperText="AWS Secrets Manager secret name or ARN; its flat JSON keys become the container environment. Leave blank for none."
+            disabled={busy}
+            fullWidth
           />
           <TextField
             select

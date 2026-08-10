@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import { HubConnectionState } from "@microsoft/signalr";
 import type * as HubClientModule from "../lib/hubClient";
-import type { ChannelEvent } from "../lib/hubClient";
+import type { ChannelHandler } from "../lib/hubClient";
 
 // Shared test double for `src/lib/hubClient`. Tests call `vi.mock("../lib/hubClient")`
 // to auto-mock the module, then `installHubMock(hubClient)` in a beforeEach to wire
@@ -9,8 +9,12 @@ import type { ChannelEvent } from "../lib/hubClient";
 // and connection state — no real SignalR connection is ever created.
 
 export interface HubMockControl {
-  /** Deliver an event to every handler subscribed to `channel`. */
-  emit(channel: string, event: Record<string, unknown>): void;
+  /**
+   * Deliver the server envelope `{ channel, event, data }` to every handler
+   * subscribed to `channel` — exactly as the real client parses it, so tests and
+   * the wire contract can never drift.
+   */
+  emit(channel: string, event: string, data?: Record<string, unknown>): void;
   /** Force a connection-state transition and notify subscribers. */
   setState(state: HubConnectionState): void;
   joinChannel: ReturnType<typeof vi.fn>;
@@ -19,7 +23,7 @@ export interface HubMockControl {
 }
 
 export function installHubMock(mod: typeof HubClientModule): HubMockControl {
-  const channelHandlers = new Map<string, Set<(e: ChannelEvent) => void>>();
+  const channelHandlers = new Map<string, Set<ChannelHandler>>();
   const stateListeners = new Set<(s: HubConnectionState) => void>();
   let state: HubConnectionState = HubConnectionState.Disconnected;
 
@@ -56,11 +60,9 @@ export function installHubMock(mod: typeof HubClientModule): HubMockControl {
   });
 
   return {
-    emit(channel, event) {
+    emit(channel, event, data = {}) {
       const set = channelHandlers.get(channel);
-      set?.forEach((handler) =>
-        handler({ channel, event: "update", ...event } as ChannelEvent),
-      );
+      set?.forEach((handler) => handler(event, data));
     },
     setState(next) {
       state = next;

@@ -31,7 +31,7 @@ import type {
   DeploySummary,
 } from "../api/types";
 import { formatRelative } from "./ServicesPage";
-import type { ChannelEvent } from "../lib/hubClient";
+import type { ChannelEventData } from "../lib/hubClient";
 import { useDeployProgress } from "../hooks/useOpsChannel";
 import LiveDot from "../components/LiveDot";
 
@@ -117,14 +117,14 @@ export function convergence(detail: DeployDetail): { converged: number; total: n
 }
 
 /**
- * Fold a live "ops:deploys" progress event into an open deploy detail. An event
- * may carry an updated per-instance result (upserted by instanceId) and/or a new
- * overall status. Returns the same reference when nothing applies.
+ * Fold a live "ops:deploys" event's data payload into an open deploy detail. The
+ * payload may carry an updated per-instance result (upserted by instanceId)
+ * and/or a new overall status. Returns the same reference when nothing applies.
  */
-export function applyDeployEvent(detail: DeployDetail, event: ChannelEvent): DeployDetail {
+export function applyDeployEvent(detail: DeployDetail, data: ChannelEventData): DeployDetail {
   let next = detail;
 
-  const instance = event.instance as DeployInstanceResult | undefined;
+  const instance = data.instance as DeployInstanceResult | undefined;
   if (instance?.instanceId) {
     const idx = detail.instances.findIndex((i) => i.instanceId === instance.instanceId);
     const instances =
@@ -134,7 +134,7 @@ export function applyDeployEvent(detail: DeployDetail, event: ChannelEvent): Dep
     next = { ...next, instances };
   }
 
-  const status = event.status as DeployStatus | undefined;
+  const status = data.status as DeployStatus | undefined;
   if (status && status !== next.status) {
     next = { ...next, status };
   }
@@ -363,9 +363,9 @@ export default function DeploysPage() {
   // Live deploy-progress events apply to the open drawer immediately (no
   // refetch); the list keeps polling as a fallback. Subscribing with the open
   // deploy's id also keeps the "live" dot lit while browsing history.
-  const onDeployEvent = useCallback((event: ChannelEvent) => {
-    setDetail((cur) => (cur ? applyDeployEvent(cur, event) : cur));
-    const status = event.status as DeployStatus | undefined;
+  const onDeployEvent = useCallback((_event: string, data: ChannelEventData) => {
+    setDetail((cur) => (cur ? applyDeployEvent(cur, data) : cur));
+    const status = data.status as DeployStatus | undefined;
     if (status) {
       setSelected((cur) => (cur ? { ...cur, status } : cur));
     }

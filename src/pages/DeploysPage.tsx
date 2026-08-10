@@ -24,20 +24,24 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import deploysApi from "../api/deploysApi";
-import type {
-  DeployDetail,
-  DeployInstanceResult,
-  DeployStatus,
-  DeploySummary,
-} from "../api/types";
+import type { DeployDetail, DeployStatus, DeploySummary } from "../api/types";
 import { formatRelative } from "./ServicesPage";
 import type { ChannelEventData } from "../lib/hubClient";
 import { useDeployProgress } from "../hooks/useOpsChannel";
+import { useLiveResource } from "../hooks/useLiveResource";
 import LiveDot from "../components/LiveDot";
 
-/** Poll fast while a rollout is mid-flight, slow once everything has settled. */
+/**
+ * Poll fast while a visible rollout is mid-flight, slow once everything has
+ * settled — but only as the FALLBACK when live updates are not flowing. With
+ * terminal deploy events now published server-side, the fast poll is a safety
+ * net (a deploy stuck in_progress client-side is corrected by the reconcile
+ * poll), not the primary path.
+ */
 const POLL_ACTIVE_MS = 5_000;
 const POLL_IDLE_MS = 30_000;
+/** Slow reconcile cadence used while live events are proving freshness. */
+const POLL_RECONCILE_MS = 60_000;
 
 const STATUS_CHIP: Record<
   DeployStatus,
@@ -117,29 +121,48 @@ export function convergence(detail: DeployDetail): { converged: number; total: n
 }
 
 /**
- * Fold a live "ops:deploys" event's data payload into an open deploy detail. The
- * payload may carry an updated per-instance result (upserted by instanceId)
- * and/or a new overall status. Returns the same reference when nothing applies.
+ * Fold a live "ops:deploys" `deploy` event's data payload into the history list,
+ * upserting the row it names by `deployId`. The payload carries the row's live
+ * fields — status and the terminal `finishedAt`/`error` in particular. An event
+ * for a deploy already in the list patches it in place; one for a deploy we have
+ * not seen (started elsewhere) is prepended as a best-effort row that the
+ * fallback poll fills out. Returns the same reference when the event names no
+ * deploy.
  */
-export function applyDeployEvent(detail: DeployDetail, data: ChannelEventData): DeployDetail {
-  let next = detail;
+export function applyDeployEvent(
+  deploys: DeploySummary[],
+  data: ChannelEventData,
+): DeploySummary[] {
+  const id = data.deployId as string | undefined;
+  if (!id) return deploys;
 
-  const instance = data.instance as DeployInstanceResult | undefined;
-  if (instance?.instanceId) {
-    const idx = detail.instances.findIndex((i) => i.instanceId === instance.instanceId);
-    const instances =
-      idx >= 0
-        ? detail.instances.map((i, k) => (k === idx ? instance : i))
-        : [...detail.instances, instance];
-    next = { ...next, instances };
+  const patch: Partial<DeploySummary> = {};
+  if (data.service !== undefined) patch.service = data.service as string;
+  if (data.action !== undefined) patch.action = data.action as string;
+  if (data.fromDigest !== undefined) patch.fromDigest = data.fromDigest as string | null;
+  if (data.toDigest !== undefined) patch.toDigest = data.toDigest as string;
+  if (data.status !== undefined) patch.status = data.status as DeployStatus;
+  if (data.finishedAt !== undefined) patch.finishedAt = data.finishedAt as string | null;
+  if (data.error !== undefined) patch.error = data.error as string | null;
+
+  const idx = deploys.findIndex((d) => d.id === id);
+  if (idx >= 0) {
+    return deploys.map((d, k) => (k === idx ? { ...d, ...patch } : d));
   }
 
-  const status = data.status as DeployStatus | undefined;
-  if (status && status !== next.status) {
-    next = { ...next, status };
-  }
-
-  return next;
+  const created: DeploySummary = {
+    id,
+    service: (data.service as string) ?? "",
+    fromDigest: (data.fromDigest as string | null) ?? null,
+    toDigest: (data.toDigest as string) ?? "",
+    actor: (data.actor as string) ?? "",
+    action: (data.action as string) ?? "deploy",
+    status: (data.status as DeployStatus) ?? "in_progress",
+    startedAt: (data.finishedAt as string | null) ?? new Date().toISOString(),
+    finishedAt: (data.finishedAt as string | null) ?? null,
+    error: (data.error as string | null) ?? null,
+  };
+  return [created, ...deploys];
 }
 
 interface DeployDetailPanelProps {
@@ -279,33 +302,37 @@ function DeployDetailPanel({
 const STATUS_OPTIONS: DeployStatus[] = ["in_progress", "done", "partial", "failed"];
 
 export default function DeploysPage() {
-  const [deploys, setDeploys] = useState<DeploySummary[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const [serviceFilter, setServiceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
-  const [selected, setSelected] = useState<DeploySummary | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedSnapshot, setSelectedSnapshot] = useState<DeploySummary | null>(null);
   const [detail, setDetail] = useState<DeployDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await deploysApi.list();
-      setDeploys(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load deploys");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Adaptive fallback cadence: 5s while a visible rollout is converging, 30s
+  // otherwise. Derived from the list below and fed back into the resource — the
+  // hook re-arms its poll when the value flips.
+  const [fallbackMs, setFallbackMs] = useState(POLL_ACTIVE_MS);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // The history list is a live resource on "ops:deploys": `deploy` events upsert
+  // the row they name (carrying terminal status/finishedAt/error), heartbeat-less
+  // freshness comes from those events, and polling is the fallback floor.
+  const {
+    data: deploys,
+    loading,
+    error,
+    refresh: load,
+    live,
+  } = useLiveResource<DeploySummary[]>(
+    useCallback(() => deploysApi.list(), []),
+    {
+      channel: "ops:deploys",
+      events: { deploy: applyDeployEvent },
+      pollMs: { fallback: fallbackMs, reconcile: POLL_RECONCILE_MS },
+    },
+  );
 
   const filtered = useMemo(
     () =>
@@ -317,17 +344,11 @@ export default function DeploysPage() {
     [deploys, serviceFilter, statusFilter],
   );
 
-  // Fast cadence while any visible rollout is still converging, slow otherwise.
-  const pollMs = filtered.some((d) => d.status === "in_progress")
-    ? POLL_ACTIVE_MS
-    : POLL_IDLE_MS;
-
+  // Keep the fallback cadence in step with whether a visible rollout is active.
+  const hasActive = filtered.some((d) => d.status === "in_progress");
   useEffect(() => {
-    const id = setInterval(() => {
-      load();
-    }, pollMs);
-    return () => clearInterval(id);
-  }, [load, pollMs]);
+    setFallbackMs(hasActive ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+  }, [hasActive]);
 
   const services = useMemo(() => {
     const set = new Set((deploys ?? []).map((d) => d.service));
@@ -348,30 +369,41 @@ export default function DeploysPage() {
   }, []);
 
   const openDeploy = (deploy: DeploySummary) => {
-    setSelected(deploy);
+    setSelectedId(deploy.id);
+    setSelectedSnapshot(deploy);
     setDetail(null);
     setDetailError(null);
     loadDetail(deploy.id);
   };
 
   const closeDeploy = () => {
-    setSelected(null);
+    setSelectedId(null);
+    setSelectedSnapshot(null);
     setDetail(null);
     setDetailError(null);
   };
 
-  // Live deploy-progress events apply to the open drawer immediately (no
-  // refetch); the list keeps polling as a fallback. Subscribing with the open
-  // deploy's id also keeps the "live" dot lit while browsing history.
-  const onDeployEvent = useCallback((_event: string, data: ChannelEventData) => {
-    setDetail((cur) => (cur ? applyDeployEvent(cur, data) : cur));
-    const status = data.status as DeployStatus | undefined;
-    if (status) {
-      setSelected((cur) => (cur ? { ...cur, status } : cur));
-    }
-  }, []);
+  // The drawer summary tracks the live list so a `deploy` event that patches the
+  // row (e.g. flips its status to done) is reflected in the header immediately;
+  // the snapshot taken on open is a fallback if the row leaves the list.
+  const selected =
+    selectedId !== null
+      ? ((deploys ?? []).find((d) => d.id === selectedId) ?? selectedSnapshot)
+      : null;
 
-  const { connected: live } = useDeployProgress(selected?.id ?? null, onDeployEvent);
+  // Per-instance convergence is too composite to patch from an event, so a
+  // `deployInstance` for the open deploy refetches its detail. useDeployProgress
+  // already filters to the selected deploy, so data.deployId is that deploy.
+  const onDeployEvent = useCallback(
+    (event: string, data: ChannelEventData) => {
+      if (event !== "deployInstance") return;
+      const id = data.deployId as string | undefined;
+      if (id) loadDetail(id);
+    },
+    [loadDetail],
+  );
+
+  useDeployProgress(selectedId, onDeployEvent);
 
   const showSkeleton = loading && deploys === null;
   const showError = !loading && error !== null && deploys === null;
@@ -439,7 +471,7 @@ export default function DeploysPage() {
             </Button>
           }
         >
-          {error}
+          {error?.message}
         </Alert>
       ) : (
         <TableContainer component={Paper}>

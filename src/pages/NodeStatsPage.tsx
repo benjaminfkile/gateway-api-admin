@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import {
   Alert,
   Box,
@@ -22,9 +22,7 @@ import { formatRelative } from "./ServicesPage";
 import { shortDigest } from "./DeploysPage";
 import { summarize } from "./InstancesPage";
 import LiveDot from "../components/LiveDot";
-import { useFleetStatus } from "../hooks/useOpsChannel";
-
-const REFRESH_INTERVAL_MS = 30_000;
+import { useLiveResource } from "../hooks/useLiveResource";
 
 /** Map a container state string onto a MUI chip colour. */
 export function serviceStateColor(
@@ -202,30 +200,23 @@ function InstanceCard({ instance }: { instance: InstanceInfo }) {
 }
 
 export default function NodeStatsPage() {
-  const [instances, setInstances] = useState<InstanceInfo[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await instancesApi.list();
-      setInstances(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load node stats");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [load]);
-
-  // Live fleet events refresh the cards immediately; polling is the fallback.
-  const { connected: live } = useFleetStatus(load);
+  // Same fleet resource as InstancesPage, rendered as cards. Composite instance
+  // rows refetch on membership/leadership/error events; heartbeats prove
+  // liveness; polling is the fallback.
+  const {
+    data: instances,
+    loading,
+    error,
+    refresh: load,
+    live,
+  } = useLiveResource<InstanceInfo[]>(
+    useCallback(() => instancesApi.list(), []),
+    {
+      channel: "ops:fleet",
+      refetchOn: ["instances", "leaderChange", "serviceError"],
+      pollMs: { fallback: 30_000, reconcile: 90_000 },
+    },
+  );
 
   const summary = useMemo(() => summarize(instances ?? []), [instances]);
 
@@ -283,7 +274,7 @@ export default function NodeStatsPage() {
             </Button>
           }
         >
-          {error}
+          {error?.message}
         </Alert>
       ) : showSkeleton ? (
         <Box

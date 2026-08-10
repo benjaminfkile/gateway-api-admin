@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import {
   Alert,
   Box,
@@ -25,9 +25,7 @@ import type { InstanceInfo } from "../api/types";
 import { formatRelative } from "./ServicesPage";
 import { shortDigest } from "./DeploysPage";
 import LiveDot from "../components/LiveDot";
-import { useFleetStatus } from "../hooks/useOpsChannel";
-
-const REFRESH_INTERVAL_MS = 30_000;
+import { useLiveResource } from "../hooks/useLiveResource";
 
 export interface InstancesSummary {
   total: number;
@@ -149,30 +147,23 @@ function ServicesCell({ instance }: { instance: InstanceInfo }) {
 }
 
 export default function InstancesPage() {
-  const [instances, setInstances] = useState<InstanceInfo[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await instancesApi.list();
-      setInstances(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load instances");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [load]);
-
-  // Live fleet events refresh the table immediately; polling is the fallback.
-  const { connected: live } = useFleetStatus(load);
+  // Instance rows are composite (services, leadership, staleness), so fleet
+  // membership/leadership/error events refetch rather than patch client-side;
+  // heartbeats only prove liveness. Polling stays the fallback.
+  const {
+    data: instances,
+    loading,
+    error,
+    refresh: load,
+    live,
+  } = useLiveResource<InstanceInfo[]>(
+    useCallback(() => instancesApi.list(), []),
+    {
+      channel: "ops:fleet",
+      refetchOn: ["instances", "leaderChange", "serviceError"],
+      pollMs: { fallback: 30_000, reconcile: 90_000 },
+    },
+  );
 
   const summary = useMemo(() => summarize(instances ?? []), [instances]);
 
@@ -234,7 +225,7 @@ export default function InstancesPage() {
             </Button>
           }
         >
-          {error}
+          {error?.message}
         </Alert>
       ) : (
         <TableContainer component={Paper}>

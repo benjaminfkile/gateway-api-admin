@@ -105,6 +105,21 @@ const stateListeners = new Set<ConnectionStateListener>();
 /** Channels the UI has joined; re-joined after every reconnect. */
 const joinedChannels = new Set<string>();
 
+/**
+ * Wall-clock time (ms) of the most recent ChannelEvent seen on each joined
+ * channel — heartbeats included. This is the end-to-end-delivery proof the UI
+ * uses for liveness: a "green but deaf" connection (Connected yet silent) reads
+ * as NOT live because its lastEventAt goes stale. Any ChannelEvent for a joined
+ * channel updates the channel's entry (see the CHANNEL_EVENT handler in
+ * getConnection); nothing else does.
+ */
+const lastEventAt = new Map<string, number>();
+
+/** Time (ms) of the last event on `channel`, or null if none seen yet. */
+export function getLastEventAt(channel: string): number | null {
+  return lastEventAt.get(channel) ?? null;
+}
+
 // Supervisor state. `supervisorActive` gates all restart work so an intentional
 // stop (sign-out) cannot resurrect the connection.
 let supervisorActive = false;
@@ -131,6 +146,15 @@ function waitForStateChange(): Promise<void> {
 function getConnection(): HubConnection {
   if (!connection) {
     connection = connectionFactory();
+    // Central liveness tap: stamp lastEventAt for every ChannelEvent on a joined
+    // channel (registered before any per-subscriber handler, so lastEventAt is
+    // fresh by the time subscribers run). Independent of whether a page is
+    // currently subscribed, so liveness reflects true wire delivery.
+    connection.on(CHANNEL_EVENT, (payload: ChannelEvent) => {
+      if (payload && joinedChannels.has(payload.channel)) {
+        lastEventAt.set(payload.channel, Date.now());
+      }
+    });
     connection.onreconnecting(notifyState);
     connection.onreconnected(() => {
       notifyState();
@@ -293,6 +317,7 @@ export async function stopConnection(): Promise<void> {
     supervisorTimer = null;
   }
   joinedChannels.clear();
+  lastEventAt.clear();
   try {
     if (conn) {
       try {
@@ -360,6 +385,7 @@ export const __testing = {
     startPromise = null;
     stateListeners.clear();
     joinedChannels.clear();
+    lastEventAt.clear();
     supervisorActive = false;
     supervisorAttempts = 0;
     intentionalStop = false;

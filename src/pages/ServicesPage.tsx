@@ -319,7 +319,7 @@ export default function ServicesPage() {
       >
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Typography variant="h5">Services</Typography>
-          <LiveDot connected={live} />
+          <LiveDot live={live} />
         </Stack>
         <Stack direction="row" spacing={1}>
           <Button

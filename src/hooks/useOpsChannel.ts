@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { HubConnectionState } from "@microsoft/signalr";
 import {
-  type ChannelEvent,
+  type ChannelHandler,
   ensureStarted,
   getConnectionState,
   joinChannel,
@@ -20,14 +20,12 @@ export interface OpsChannel {
 /**
  * Subscribe a component to a logical hub channel. Lazily starts the one shared
  * connection, joins the channel on mount, and leaves + unsubscribes on unmount.
- * `onEvent` fires for every event on the channel; the latest callback is used
- * without re-subscribing. The hub is purely additive — callers keep polling as
- * a fallback and use `connected` to show that live updates are flowing.
+ * `onEvent` fires for every event on the channel with the event name and its
+ * data payload; the latest callback is used without re-subscribing. The hub is
+ * purely additive — callers keep polling as a fallback and use `connected` to
+ * show that live updates are flowing.
  */
-export function useOpsChannel(
-  channel: string,
-  onEvent: (event: ChannelEvent) => void,
-): OpsChannel {
+export function useOpsChannel(channel: string, onEvent: ChannelHandler): OpsChannel {
   const [connectionState, setConnectionState] =
     useState<HubConnectionState>(getConnectionState());
 
@@ -38,8 +36,8 @@ export function useOpsChannel(
   useEffect(() => {
     let active = true;
     const unsubState = subscribeConnectionState(setConnectionState);
-    const unsubEvent = onChannelEvent(channel, (event) => {
-      handlerRef.current(event);
+    const unsubEvent = onChannelEvent(channel, (event, data) => {
+      handlerRef.current(event, data);
     });
 
     ensureStarted()
@@ -48,8 +46,10 @@ export function useOpsChannel(
         setConnectionState(getConnectionState());
         return joinChannel(channel);
       })
-      .catch(() => {
-        // Hub unavailable — polling remains the fallback. Swallow.
+      .catch((err) => {
+        // Hub unavailable — polling remains the fallback. Surface it in the
+        // console instead of swallowing so a stuck subscription is diagnosable.
+        console.warn(`useOpsChannel: could not start/join "${channel}"`, err);
       });
 
     return () => {
@@ -57,7 +57,9 @@ export function useOpsChannel(
       unsubEvent();
       unsubState();
       // Best-effort leave; ignore if the socket is already gone.
-      void leaveChannel(channel).catch(() => {});
+      void leaveChannel(channel).catch((err) => {
+        console.warn(`useOpsChannel: could not leave "${channel}"`, err);
+      });
     };
   }, [channel]);
 
@@ -68,7 +70,7 @@ export function useOpsChannel(
 }
 
 /** Live fleet updates (service/instance changes) on the "ops:fleet" channel. */
-export function useFleetStatus(onEvent: (event: ChannelEvent) => void): OpsChannel {
+export function useFleetStatus(onEvent: ChannelHandler): OpsChannel {
   return useOpsChannel("ops:fleet", onEvent);
 }
 
@@ -79,9 +81,9 @@ export function useFleetStatus(onEvent: (event: ChannelEvent) => void): OpsChann
  */
 export function useDeployProgress(
   deployId: string | null,
-  onEvent: (event: ChannelEvent) => void,
+  onEvent: ChannelHandler,
 ): OpsChannel {
-  return useOpsChannel("ops:deploys", (event) => {
-    if (deployId !== null && event.deployId === deployId) onEvent(event);
+  return useOpsChannel("ops:deploys", (event, data) => {
+    if (deployId !== null && data.deployId === deployId) onEvent(event, data);
   });
 }

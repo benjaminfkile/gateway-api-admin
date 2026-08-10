@@ -7,7 +7,7 @@ vi.mock("../lib/hubClient");
 
 import { installHubMock, type HubMockControl } from "../test/hubClientMock";
 import { useDeployProgress, useFleetStatus, useOpsChannel } from "./useOpsChannel";
-import type { ChannelEvent } from "../lib/hubClient";
+import type { ChannelHandler } from "../lib/hubClient";
 
 let hub: HubMockControl;
 
@@ -24,7 +24,7 @@ function Probe({
   onEvent,
 }: {
   channel: string;
-  onEvent: (e: ChannelEvent) => void;
+  onEvent: ChannelHandler;
 }) {
   const { connected } = useOpsChannel(channel, onEvent);
   return <div data-testid="state">{connected ? "live" : "offline"}</div>;
@@ -54,13 +54,14 @@ describe("useOpsChannel", () => {
     render(<Probe channel="ops:fleet" onEvent={onEvent} />);
     await waitFor(() => expect(hubClient.joinChannel).toHaveBeenCalled());
 
-    act(() => hub.emit("ops:fleet", { event: "serviceChanged" }));
+    act(() => hub.emit("ops:fleet", "serviceChanged", { service: "web" }));
     expect(onEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: "ops:fleet", event: "serviceChanged" }),
+      "serviceChanged",
+      expect.objectContaining({ service: "web" }),
     );
 
     // Events on other channels are ignored.
-    act(() => hub.emit("ops:deploys", { event: "progress" }));
+    act(() => hub.emit("ops:deploys", "deploy", {}));
     expect(onEvent).toHaveBeenCalledTimes(1);
   });
 
@@ -70,12 +71,12 @@ describe("useOpsChannel", () => {
     await waitFor(() => expect(hubClient.joinChannel).toHaveBeenCalled());
 
     unmount();
-    act(() => hub.emit("ops:fleet", { event: "serviceChanged" }));
+    act(() => hub.emit("ops:fleet", "serviceChanged", {}));
     expect(onEvent).not.toHaveBeenCalled();
   });
 });
 
-function DeployProbe({ onEvent }: { onEvent: (e: ChannelEvent) => void }) {
+function DeployProbe({ onEvent }: { onEvent: ChannelHandler }) {
   const [id, setId] = useState<string | null>("d-1");
   useDeployProgress(id, onEvent);
   return (
@@ -93,15 +94,15 @@ describe("useDeployProgress", () => {
       expect(hubClient.joinChannel).toHaveBeenCalledWith("ops:deploys"),
     );
 
-    act(() => hub.emit("ops:deploys", { event: "progress", deployId: "d-9" }));
+    act(() => hub.emit("ops:deploys", "deploy", { deployId: "d-9" }));
     expect(onEvent).not.toHaveBeenCalled();
 
-    act(() => hub.emit("ops:deploys", { event: "progress", deployId: "d-1" }));
+    act(() => hub.emit("ops:deploys", "deploy", { deployId: "d-1" }));
     expect(onEvent).toHaveBeenCalledTimes(1);
   });
 });
 
-function FleetProbe({ onEvent }: { onEvent: (e: ChannelEvent) => void }) {
+function FleetProbe({ onEvent }: { onEvent: ChannelHandler }) {
   useFleetStatus(onEvent);
   return null;
 }

@@ -165,8 +165,7 @@ describe("DeploysPage", () => {
     const before = detailGets();
 
     act(() =>
-      hub.emit("ops:deploys", {
-        event: "progress",
+      hub.emit("ops:deploys", "deploy", {
         deployId: "d-2",
         instance: {
           instanceId: "i-0003",
@@ -202,8 +201,7 @@ describe("DeploysPage", () => {
     expect(within(panel).getByText("0/1 instances converged")).toBeInTheDocument();
 
     act(() =>
-      hub.emit("ops:deploys", {
-        event: "progress",
+      hub.emit("ops:deploys", "deploy", {
         deployId: "d-OTHER",
         instance: {
           instanceId: "i-0003",
@@ -303,8 +301,6 @@ describe("applyDeployEvent", () => {
 
   it("upserts an existing instance by id", () => {
     const next = applyDeployEvent(base, {
-      channel: "ops:deploys",
-      event: "progress",
       instance: { instanceId: "i-1", status: "converged", detail: null, updatedAt: "t" },
     });
     expect(next.instances).toHaveLength(1);
@@ -314,8 +310,6 @@ describe("applyDeployEvent", () => {
 
   it("appends a new instance not yet present", () => {
     const next = applyDeployEvent(base, {
-      channel: "ops:deploys",
-      event: "progress",
       instance: { instanceId: "i-2", status: "updating", detail: null, updatedAt: "t" },
     });
     expect(next.instances.map((i) => i.instanceId)).toEqual(["i-1", "i-2"]);
@@ -323,15 +317,13 @@ describe("applyDeployEvent", () => {
 
   it("updates the overall status", () => {
     const next = applyDeployEvent(base, {
-      channel: "ops:deploys",
-      event: "progress",
       status: "done",
     });
     expect(next.status).toBe("done");
   });
 
   it("returns the same reference when nothing applies", () => {
-    const next = applyDeployEvent(base, { channel: "ops:deploys", event: "heartbeat" });
+    const next = applyDeployEvent(base, {});
     expect(next).toBe(base);
   });
 });

@@ -247,7 +247,7 @@ describe("ServicesPage", () => {
       mock.history.get.filter((g) => g.url === "/mgmt/services").length;
     const before = gets();
 
-    act(() => hub.emit("ops:fleet", { event: "serviceChanged" }));
+    act(() => hub.emit("ops:fleet", "serviceError", { service: "web", instanceId: "i-1" }));
     await waitFor(() => expect(gets()).toBe(before + 1));
   });
 

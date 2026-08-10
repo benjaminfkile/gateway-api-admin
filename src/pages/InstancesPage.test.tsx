@@ -253,7 +253,7 @@ describe("InstancesPage", () => {
       mock.history.get.filter((g) => g.url === "/mgmt/instances").length;
     const before = gets();
 
-    act(() => hub.emit("ops:fleet", { event: "instanceChanged" }));
+    act(() => hub.emit("ops:fleet", "instances", { joined: [], pruned: [] }));
     await waitFor(() => expect(gets()).toBe(before + 1));
   });
 

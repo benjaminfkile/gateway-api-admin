@@ -5,6 +5,7 @@ import {
   __testing,
   ensureStarted,
   getConnectionState,
+  getLastEventAt,
   joinChannel,
   leaveChannel,
   nextBackoffDelayMs,
@@ -298,5 +299,39 @@ describe("envelope parsing", () => {
       data: { deployId: "d-2" },
     });
     expect(received).toHaveLength(1); // unsubscribed handler no longer fires
+  });
+});
+
+describe("liveness (lastEventAt)", () => {
+  it("stamps lastEventAt for events on a joined channel — heartbeats included", async () => {
+    const fake = useFake();
+    await ensureStarted();
+    await joinChannel("ops:fleet");
+
+    expect(getLastEventAt("ops:fleet")).toBeNull();
+
+    fake.pushServer("ChannelEvent", {
+      channel: "ops:fleet",
+      event: "heartbeat",
+      data: { ts: "2026-08-10T00:00:00Z" },
+    });
+
+    const first = getLastEventAt("ops:fleet");
+    expect(first).toBeTypeOf("number");
+  });
+
+  it("ignores events for channels the UI has not joined", async () => {
+    const fake = useFake();
+    // Connection exists (tap registered) and one channel is joined, but a stray
+    // event for a *different*, unjoined channel must not register liveness.
+    await ensureStarted();
+    await joinChannel("ops:fleet");
+
+    fake.pushServer("ChannelEvent", {
+      channel: "ops:deploys",
+      event: "deploy",
+      data: {},
+    });
+    expect(getLastEventAt("ops:deploys")).toBeNull();
   });
 });

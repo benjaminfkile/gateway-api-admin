@@ -240,7 +240,7 @@ export default function NodeStatsPage() {
       >
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Typography variant="h5">Node stats</Typography>
-          <LiveDot connected={live} />
+          <LiveDot live={live} />
         </Stack>
         <Button
           startIcon={<RefreshIcon />}

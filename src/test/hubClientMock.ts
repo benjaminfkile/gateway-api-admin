@@ -25,11 +25,18 @@ export interface HubMockControl {
 export function installHubMock(mod: typeof HubClientModule): HubMockControl {
   const channelHandlers = new Map<string, Set<ChannelHandler>>();
   const stateListeners = new Set<(s: HubConnectionState) => void>();
+  // Mirrors the real client's lastEventAt tap: any emitted ChannelEvent stamps
+  // its channel, so liveness in tests is driven by the same wire proof (a
+  // heartbeat on ops:fleet, a deploy event, etc.) the gateway sends.
+  const lastEventAt = new Map<string, number>();
   let state: HubConnectionState = HubConnectionState.Disconnected;
 
   const notify = () => stateListeners.forEach((listener) => listener(state));
 
   vi.mocked(mod.getConnectionState).mockImplementation(() => state);
+  vi.mocked(mod.getLastEventAt).mockImplementation(
+    (channel) => lastEventAt.get(channel) ?? null,
+  );
 
   vi.mocked(mod.ensureStarted).mockImplementation(() => {
     state = HubConnectionState.Connected;
@@ -61,6 +68,9 @@ export function installHubMock(mod: typeof HubClientModule): HubMockControl {
 
   return {
     emit(channel, event, data = {}) {
+      // Stamp lastEventAt before dispatch, exactly as the real client's central
+      // tap runs ahead of per-subscriber handlers.
+      lastEventAt.set(channel, Date.now());
       const set = channelHandlers.get(channel);
       set?.forEach((handler) => handler(event, data));
     },

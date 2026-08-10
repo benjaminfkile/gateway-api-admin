@@ -187,7 +187,7 @@ export default function InstancesPage() {
       >
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Typography variant="h5">Instances</Typography>
-          <LiveDot connected={live} />
+          <LiveDot live={live} />
         </Stack>
         <Button
           startIcon={<RefreshIcon />}

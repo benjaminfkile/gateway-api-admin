@@ -384,7 +384,7 @@ export default function DeploysPage() {
       >
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Typography variant="h5">Deploys</Typography>
-          <LiveDot connected={live} />
+          <LiveDot live={live} />
         </Stack>
         <Button
           startIcon={<RefreshIcon />}

@@ -77,6 +77,11 @@ export interface DeploySummary {
   status: DeployStatus;
   startedAt: string;
   finishedAt: string | null;
+  /**
+   * Terminal error message once a deploy has failed (or null/absent while it is
+   * still in progress or succeeded). Carried by the "deploy" wire event.
+   */
+  error?: string | null;
 }
 
 export interface DeployInstanceResult {

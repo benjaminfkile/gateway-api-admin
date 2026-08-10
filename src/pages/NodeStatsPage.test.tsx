@@ -208,7 +208,8 @@ describe("NodeStatsPage", () => {
     renderPage();
 
     await loadedGrid("i-follower");
-    await screen.findByLabelText("live");
+    // Connected but deaf: honest liveness reads offline until an event lands.
+    expect(screen.getByLabelText("offline")).toBeInTheDocument();
 
     const gets = () =>
       mock.history.get.filter((g) => g.url === "/mgmt/instances").length;
@@ -216,6 +217,7 @@ describe("NodeStatsPage", () => {
 
     act(() => hub.emit("ops:fleet", "instances", { joined: [], pruned: [] }));
     await waitFor(() => expect(gets()).toBe(before + 1));
+    await screen.findByLabelText("live");
   });
 
   it("shows an error state with retry that recovers", async () => {

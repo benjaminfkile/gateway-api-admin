@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Alert,
   Box,
@@ -41,9 +41,8 @@ import RollbackDialog from "../components/RollbackDialog";
 import ServiceFormDialog from "../components/ServiceFormDialog";
 import RemoveServiceDialog from "../components/RemoveServiceDialog";
 import LiveDot from "../components/LiveDot";
-import { useFleetStatus } from "../hooks/useOpsChannel";
-
-const REFRESH_INTERVAL_MS = 30_000;
+import { useLiveResource } from "../hooks/useLiveResource";
+import type { ChannelEventData } from "../lib/hubClient";
 
 type FleetStatus = "running" | "stopped" | "partial";
 type ServiceAction = "start" | "stop" | "restart";
@@ -204,11 +203,44 @@ function ReconcileErrorIndicator({ service }: { service: ServiceSummary }) {
   );
 }
 
-export default function ServicesPage() {
-  const [services, setServices] = useState<ServiceSummary[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+/**
+ * Fold a live "ops:fleet" serviceError event into the fleet grid. The event
+ * reports the latest reconcile error (or its clearing) for one service on one
+ * instance — we patch that service's `fleet.latestError` in place rather than
+ * refetch the whole grid. Exact `errorOn` counts are left to the reconcile poll;
+ * a fresh error nudges the count to at least one so the indicator surfaces
+ * immediately, and a cleared error drops the detail while the poll settles the
+ * count.
+ */
+export function applyServiceError(
+  services: ServiceSummary[],
+  data: ChannelEventData,
+): ServiceSummary[] {
+  const name = data.service as string | undefined;
+  if (!name) return services;
+  const idx = services.findIndex((s) => s.name === name);
+  if (idx < 0) return services;
 
+  const lastError = (data.lastError as string | null | undefined) ?? null;
+  const instanceId = (data.instanceId as string | undefined) ?? "";
+  const lastErrorAt = (data.lastErrorAt as string | null | undefined) ?? null;
+
+  const target = services[idx];
+  const fleet = { ...target.fleet };
+  if (lastError) {
+    fleet.latestError = {
+      instanceId,
+      message: lastError,
+      at: lastErrorAt ?? new Date().toISOString(),
+    };
+    fleet.errorOn = Math.max(fleet.errorOn ?? 0, 1);
+  } else {
+    fleet.latestError = undefined;
+  }
+  return services.map((s, k) => (k === idx ? { ...s, fleet } : s));
+}
+
+export default function ServicesPage() {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuService, setMenuService] = useState<ServiceSummary | null>(null);
 
@@ -223,28 +255,23 @@ export default function ServicesPage() {
 
   const { showSuccess, showError } = useSnackbar();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await servicesApi.list();
-      setServices(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load services");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [load]);
-
-  // Live fleet events refresh the grid immediately; polling above is the
-  // fallback whenever the hub is disconnected.
-  const { connected: live } = useFleetStatus(load);
+  // Live-with-a-polling-floor: serviceError events patch the affected row's
+  // latest error in place, heartbeats only prove freshness (liveness), and
+  // polling stays the fallback whenever the hub is disconnected or silent.
+  const {
+    data: services,
+    loading,
+    error,
+    refresh: load,
+    live,
+  } = useLiveResource<ServiceSummary[]>(
+    useCallback(() => servicesApi.list(), []),
+    {
+      channel: "ops:fleet",
+      events: { serviceError: applyServiceError },
+      pollMs: { fallback: 30_000, reconcile: 90_000 },
+    },
+  );
 
   const openMenu = (event: React.MouseEvent<HTMLElement>, service: ServiceSummary) => {
     setMenuAnchor(event.currentTarget);
@@ -349,7 +376,7 @@ export default function ServicesPage() {
             </Button>
           }
         >
-          {error}
+          {error?.message}
         </Alert>
       ) : (
         <TableContainer component={Paper}>

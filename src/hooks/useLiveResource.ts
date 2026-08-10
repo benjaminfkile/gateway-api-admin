@@ -19,7 +19,13 @@ export interface UseLiveResourceOptions<T> {
   /** Hub channel to subscribe to (e.g. "ops:fleet", "ops:deploys"). */
   channel: string;
   /** Per-event reducers; an event with no entry here only proves freshness. */
-  events: Record<string, LiveReducer<T>>;
+  events?: Record<string, LiveReducer<T>>;
+  /**
+   * Event names that force an immediate refetch instead of a client-side patch.
+   * For data too composite to fold in from an event payload (e.g. instance rows),
+   * a refetch is the honest way to reconcile — the event still proves freshness.
+   */
+  refetchOn?: string[];
   pollMs: {
     /** Fast cadence used while NOT live (the page's current polling rate). */
     fallback: number;
@@ -125,27 +131,33 @@ export function useLiveResource<T>(
     channel,
     useCallback(
       (event: string, eventData: Record<string, unknown>) => {
-        const reducer = optionsRef.current.events[event];
+        const opts = optionsRef.current;
+        const reducer = opts.events?.[event];
         if (reducer) setData((prev) => (prev === null ? prev : reducer(prev, eventData)));
+        // Some events carry too little to patch a composite row from; refetch.
+        if (opts.refetchOn?.includes(event)) void runFetch();
         // The hub already stamped lastEventAt for this channel; mirror it into
         // state so liveness recomputes, and reset the poll (freshness proven).
         setLastEventAt(getLastEventAt(channel) ?? Date.now());
         schedulePoll();
       },
-      [channel, schedulePoll],
+      [channel, schedulePoll, runFetch],
     ),
   );
 
   const live =
     connected && lastEventAt !== null && Date.now() - lastEventAt < LIVENESS_WINDOW_MS;
 
-  // When liveness flips, the poll cadence must change immediately.
+  // Re-arm the poll whenever the cadence it should run at changes: either
+  // liveness flipped (reconcile ⇄ fallback) or the caller tightened/loosened a
+  // cadence between renders (e.g. a page whose fallback drops to 5s while a
+  // rollout is in flight, then back to 30s once it settles). Reading the value
+  // here — not just `live` — keeps an adaptive `pollMs.fallback` honest.
+  const effectiveInterval = live ? options.pollMs.reconcile : options.pollMs.fallback;
   useEffect(() => {
-    if (liveRef.current !== live) {
-      liveRef.current = live;
-      if (activeRef.current) schedulePoll();
-    }
-  }, [live, schedulePoll]);
+    liveRef.current = live;
+    if (activeRef.current) schedulePoll();
+  }, [effectiveInterval, live, schedulePoll]);
 
   // Arm a one-shot timer at the moment the current window would lapse, so a
   // channel that goes silent transitions to NOT live on time.

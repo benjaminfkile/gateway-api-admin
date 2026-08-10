@@ -247,14 +247,54 @@ describe("InstancesPage", () => {
     renderPage();
 
     await loadedTable("i-follower");
-    await screen.findByLabelText("live");
+    // Connected but deaf: honest liveness reads offline until an event lands.
+    expect(screen.getByLabelText("offline")).toBeInTheDocument();
 
     const gets = () =>
       mock.history.get.filter((g) => g.url === "/mgmt/instances").length;
     const before = gets();
 
+    // An "instances" (joined/pruned) event refetches — instance rows are too
+    // composite to patch — and proves delivery, lighting the dot.
     act(() => hub.emit("ops:fleet", "instances", { joined: [], pruned: [] }));
     await waitFor(() => expect(gets()).toBe(before + 1));
+    await screen.findByLabelText("live");
+  });
+
+  it("refetches on leaderChange and serviceError, but not on a heartbeat", async () => {
+    mock.onGet("/mgmt/instances").reply(200, [FOLLOWER]);
+    renderPage();
+
+    await loadedTable("i-follower");
+    const gets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/instances").length;
+
+    let before = gets();
+    act(() => hub.emit("ops:fleet", "leaderChange", { instanceId: "i-x" }));
+    await waitFor(() => expect(gets()).toBe(before + 1));
+
+    before = gets();
+    act(() =>
+      hub.emit("ops:fleet", "serviceError", {
+        service: "web",
+        instanceId: "i-follower",
+        lastError: "boom",
+        lastErrorAt: null,
+      }),
+    );
+    await waitFor(() => expect(gets()).toBe(before + 1));
+
+    // A heartbeat only proves liveness — it must not trigger a refetch.
+    before = gets();
+    act(() =>
+      hub.emit("ops:fleet", "heartbeat", {
+        ts: "2026-08-10T00:00:00Z",
+        leaderInstanceId: "i-follower",
+        instanceCount: 1,
+      }),
+    );
+    expect(gets()).toBe(before);
+    await screen.findByLabelText("live");
   });
 
   it("shows an error state with retry that recovers", async () => {

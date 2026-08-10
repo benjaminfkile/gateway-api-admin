@@ -138,7 +138,7 @@ describe("DeploysPage", () => {
     expect(within(panel).getByText("pulling image")).toBeInTheDocument();
   });
 
-  it("applies a live deploy-progress event to the open drawer immediately", async () => {
+  it("reflects a deploy event's terminal status in the open drawer without a refetch", async () => {
     const user = userEvent.setup();
     const detail: DeployDetail = {
       ...IN_PROGRESS,
@@ -157,33 +157,81 @@ describe("DeploysPage", () => {
     await user.click(within(rowFor(table, "worker")).getByText("worker"));
 
     const panel = await screen.findByRole("region", { name: /deploy d-2 detail/i });
-    expect(within(panel).getByText("2/3 instances converged")).toBeInTheDocument();
+    // Drawer header shows the in_progress status chip.
+    expect(within(panel).getByText("in_progress")).toBeInTheDocument();
 
-    // A live event converges the last instance — the drawer updates without a refetch.
     const detailGets = () =>
       mock.history.get.filter((g) => g.url === "/mgmt/deploys/d-2").length;
     const before = detailGets();
 
+    // A terminal `deploy` event upserts the list row; the derived drawer summary
+    // flips to done — no detail refetch is needed for the header.
     act(() =>
       hub.emit("ops:deploys", "deploy", {
         deployId: "d-2",
-        instance: {
-          instanceId: "i-0003",
-          status: "converged",
-          detail: null,
-          updatedAt: "2026-08-03T00:00:20Z",
-        },
+        service: "worker",
+        action: "deploy",
+        fromDigest: IN_PROGRESS.fromDigest,
+        toDigest: IN_PROGRESS.toDigest,
         status: "done",
+        finishedAt: "2026-08-03T00:02:00Z",
+        error: null,
       }),
     );
 
-    expect(await within(panel).findByText("3/3 instances converged")).toBeInTheDocument();
-    // Status chip reflects the live status too, and no extra fetch was made.
-    expect(within(panel).getByText("done")).toBeInTheDocument();
+    expect(await within(panel).findByText("done")).toBeInTheDocument();
     expect(detailGets()).toBe(before);
   });
 
-  it("ignores deploy events for a different deploy", async () => {
+  it("refetches the open drawer detail on a deployInstance event", async () => {
+    const user = userEvent.setup();
+    let detail: DeployDetail = {
+      ...IN_PROGRESS,
+      instances: [
+        { instanceId: "i-0001", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:10Z" },
+        { instanceId: "i-0002", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:12Z" },
+        { instanceId: "i-0003", status: "updating", detail: "pulling image", updatedAt: "2026-08-03T00:00:14Z" },
+      ],
+    };
+    mock.onGet("/mgmt/deploys").reply(200, [IN_PROGRESS]);
+    mock.onGet("/mgmt/deploys/d-2").reply(() => [200, detail]);
+    renderPage();
+
+    const table = await historyTable();
+    await within(table).findByText("worker");
+    await user.click(within(rowFor(table, "worker")).getByText("worker"));
+
+    const panel = await screen.findByRole("region", { name: /deploy d-2 detail/i });
+    expect(within(panel).getByText("2/3 instances converged")).toBeInTheDocument();
+
+    const detailGets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/deploys/d-2").length;
+    const before = detailGets();
+
+    // The server now reports the last instance converged; a deployInstance event
+    // triggers a detail refetch that picks it up.
+    detail = {
+      ...IN_PROGRESS,
+      instances: [
+        { instanceId: "i-0001", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:10Z" },
+        { instanceId: "i-0002", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:12Z" },
+        { instanceId: "i-0003", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:20Z" },
+      ],
+    };
+    act(() =>
+      hub.emit("ops:deploys", "deployInstance", {
+        deployId: "d-2",
+        instanceId: "i-0003",
+        status: "converged",
+        error: null,
+      }),
+    );
+
+    await waitFor(() => expect(detailGets()).toBe(before + 1));
+    expect(await within(panel).findByText("3/3 instances converged")).toBeInTheDocument();
+  });
+
+  it("ignores a deployInstance event for a different deploy", async () => {
     const user = userEvent.setup();
     const detail: DeployDetail = {
       ...IN_PROGRESS,
@@ -200,19 +248,21 @@ describe("DeploysPage", () => {
     const panel = await screen.findByRole("region", { name: /deploy d-2 detail/i });
     expect(within(panel).getByText("0/1 instances converged")).toBeInTheDocument();
 
+    const detailGets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/deploys/d-2").length;
+    const before = detailGets();
+
     act(() =>
-      hub.emit("ops:deploys", "deploy", {
+      hub.emit("ops:deploys", "deployInstance", {
         deployId: "d-OTHER",
-        instance: {
-          instanceId: "i-0003",
-          status: "converged",
-          detail: null,
-          updatedAt: "2026-08-03T00:00:20Z",
-        },
+        instanceId: "i-0003",
+        status: "converged",
+        error: null,
       }),
     );
 
-    // Unchanged — the event targeted a different deploy.
+    // useDeployProgress filters to the selected deploy — no refetch, unchanged.
+    expect(detailGets()).toBe(before);
     expect(within(panel).getByText("0/1 instances converged")).toBeInTheDocument();
   });
 
@@ -292,38 +342,38 @@ describe("DeploysPage", () => {
 });
 
 describe("applyDeployEvent", () => {
-  const base: DeployDetail = {
-    ...IN_PROGRESS,
-    instances: [
-      { instanceId: "i-1", status: "updating", detail: null, updatedAt: "2026-08-03T00:00:00Z" },
-    ],
-  };
+  const list: DeploySummary[] = [DONE, IN_PROGRESS];
 
-  it("upserts an existing instance by id", () => {
-    const next = applyDeployEvent(base, {
-      instance: { instanceId: "i-1", status: "converged", detail: null, updatedAt: "t" },
-    });
-    expect(next.instances).toHaveLength(1);
-    expect(next.instances[0].status).toBe("converged");
-    expect(next).not.toBe(base);
-  });
-
-  it("appends a new instance not yet present", () => {
-    const next = applyDeployEvent(base, {
-      instance: { instanceId: "i-2", status: "updating", detail: null, updatedAt: "t" },
-    });
-    expect(next.instances.map((i) => i.instanceId)).toEqual(["i-1", "i-2"]);
-  });
-
-  it("updates the overall status", () => {
-    const next = applyDeployEvent(base, {
+  it("patches the matching row's status and terminal fields", () => {
+    const next = applyDeployEvent(list, {
+      deployId: "d-2",
       status: "done",
+      finishedAt: "2026-08-03T00:05:00Z",
+      error: null,
     });
-    expect(next.status).toBe("done");
+    const row = next.find((d) => d.id === "d-2");
+    expect(row?.status).toBe("done");
+    expect(row?.finishedAt).toBe("2026-08-03T00:05:00Z");
+    expect(next).not.toBe(list);
+    // Rows the event does not name keep their identity.
+    expect(next.find((d) => d.id === "d-1")).toBe(DONE);
   });
 
-  it("returns the same reference when nothing applies", () => {
-    const next = applyDeployEvent(base, {});
-    expect(next).toBe(base);
+  it("prepends a best-effort row for an unseen deploy", () => {
+    const next = applyDeployEvent(list, {
+      deployId: "d-NEW",
+      service: "api",
+      toDigest: "sha256:cccccccccccc",
+      status: "in_progress",
+      finishedAt: null,
+    });
+    expect(next).toHaveLength(3);
+    expect(next[0].id).toBe("d-NEW");
+    expect(next[0].service).toBe("api");
+    expect(next[0].status).toBe("in_progress");
+  });
+
+  it("returns the same reference when the event names no deploy", () => {
+    expect(applyDeployEvent(list, {})).toBe(list);
   });
 });

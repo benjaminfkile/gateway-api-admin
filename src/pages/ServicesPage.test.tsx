@@ -235,20 +235,60 @@ describe("ServicesPage", () => {
     expect(mock.history.post[0].params).toBeUndefined();
   });
 
-  it("refetches on a live fleet event and shows the live dot as fallback-free", async () => {
+  it("lights the live dot only once an event proves delivery", async () => {
     mock.onGet("/mgmt/services").reply(200, [RUNNING]);
     renderPage();
 
     await screen.findByText("web");
-    // Hub connected → the "live" dot is lit while polling stays as a fallback.
-    await screen.findByLabelText("live");
+    // Connected but deaf: honest liveness reads offline until an event lands.
+    expect(screen.getByLabelText("offline")).toBeInTheDocument();
 
+    act(() => hub.emit("ops:fleet", "heartbeat", { ts: "2026-08-10T00:00:00Z" }));
+    await screen.findByLabelText("live");
+  });
+
+  it("patches a service's latest error in place on a serviceError event", async () => {
+    const user = userEvent.setup();
+    mock.onGet("/mgmt/services").reply(200, [ERRORED]);
+    renderPage();
+
+    await screen.findByText("api");
     const gets = () =>
       mock.history.get.filter((g) => g.url === "/mgmt/services").length;
     const before = gets();
 
-    act(() => hub.emit("ops:fleet", "serviceError", { service: "web", instanceId: "i-1" }));
-    await waitFor(() => expect(gets()).toBe(before + 1));
+    act(() =>
+      hub.emit("ops:fleet", "serviceError", {
+        service: "api",
+        instanceId: "i-99",
+        lastError: "disk full",
+        lastErrorAt: "2026-08-09T00:00:00Z",
+      }),
+    );
+
+    // Patched in place — the grid is not refetched.
+    expect(gets()).toBe(before);
+    await user.hover(within(rowFor("api")).getByLabelText(/reconcile error/i));
+    expect(await screen.findByText("disk full")).toBeInTheDocument();
+  });
+
+  it("fast-polls as the fallback while not live", async () => {
+    vi.useFakeTimers();
+    mock.onGet("/mgmt/services").reply(200, [RUNNING]);
+    renderPage();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const gets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/services").length;
+    expect(gets()).toBe(1);
+
+    // Connected-but-deaf → 30s fallback cadence.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(gets()).toBe(2);
   });
 
   it("opens the edit dialog prefilled and PUTs the update", async () => {

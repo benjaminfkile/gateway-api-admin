@@ -153,6 +153,66 @@ describe("useLiveResource", () => {
     expect(screen.getByTestId("data")).toHaveTextContent('{"items":["a","b"]}');
   });
 
+  it("refetches on an event listed in refetchOn instead of patching", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ n: 1 });
+    render(
+      <Probe
+        fetcher={fetcher}
+        options={{
+          channel: "ops:fleet",
+          events: {},
+          refetchOn: ["instances"],
+          pollMs: POLL,
+        }}
+      />,
+    );
+    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // A refetch-triggering event refetches (proof of freshness + reconcile).
+    await act(async () => {
+      hub.emit("ops:fleet", "instances", { joined: [], pruned: [] });
+    });
+    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    // An event NOT in refetchOn only proves freshness — no refetch.
+    await act(async () => {
+      hub.emit("ops:fleet", "leaderChange", { instanceId: "i-1" });
+    });
+    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-arms the poll when an adaptive fallback cadence changes", async () => {
+    // Fallback tightens to 5s while `active` is true, relaxes to 30s otherwise —
+    // the shape DeploysPage uses. Never live (no events), so fallback governs.
+    const fetcher = vi.fn().mockResolvedValue({ n: 1 });
+    function Adaptive({ active }: { active: boolean }) {
+      const { data } = useLiveResource(fetcher, {
+        channel: "ops:fleet",
+        events: {},
+        pollMs: { fallback: active ? 5_000 : 30_000, reconcile: 90_000 },
+      });
+      return <span data-testid="data">{JSON.stringify(data)}</span>;
+    }
+
+    const { rerender } = render(<Adaptive active />);
+    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // Fast cadence: a 5s tick refetches.
+    await advance(5_000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    // Relax to the idle cadence: the 5s timer is dropped and re-armed at 30s.
+    rerender(<Adaptive active={false} />);
+    await advance(5_000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await advance(25_000);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it("refresh() forces an immediate fetch", async () => {
     const fetcher = vi.fn().mockResolvedValue({ n: 1 });
     render(

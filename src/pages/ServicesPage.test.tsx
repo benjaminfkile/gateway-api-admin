@@ -153,6 +153,71 @@ describe("ServicesPage", () => {
     ).toBeNull();
   });
 
+  // FINDING 6: a serviceError event reporting the error resolved (lastError null)
+  // must clear BOTH the detail and the count, so no phantom warning badge lingers
+  // on a healthy service.
+  it("clears the reconcile-error badge when a serviceError event reports it resolved", async () => {
+    mock.onGet("/mgmt/services").reply(200, [ERRORED]);
+    renderPage();
+
+    await screen.findByText("api");
+    // Starts errored: the badge is present.
+    expect(
+      within(rowFor("api")).getByLabelText(/reconcile error on/i),
+    ).toBeInTheDocument();
+
+    // A clearing event (lastError null) resolves the error for that service.
+    act(() =>
+      hub.emit("ops:fleet", "serviceError", {
+        service: "api",
+        instanceId: "i-0badcafe",
+        lastError: null,
+        lastErrorAt: null,
+      }),
+    );
+
+    // The badge disappears — errorOn was zeroed, not left dangling at 2.
+    await waitFor(() =>
+      expect(
+        within(rowFor("api")).queryByLabelText(/reconcile error/i),
+      ).toBeNull(),
+    );
+  });
+
+  it("clears a freshly-set error badge on a set-then-clear serviceError sequence", async () => {
+    mock.onGet("/mgmt/services").reply(200, [RUNNING]);
+    renderPage();
+
+    await screen.findByText("web");
+    expect(within(rowFor("web")).queryByLabelText(/reconcile error/i)).toBeNull();
+
+    // A serviceError sets an error on the previously-healthy service.
+    act(() =>
+      hub.emit("ops:fleet", "serviceError", {
+        service: "web",
+        instanceId: "i-0001",
+        lastError: "image pull failed",
+        lastErrorAt: "2026-08-08T00:00:00Z",
+      }),
+    );
+    expect(
+      await within(rowFor("web")).findByLabelText(/reconcile error/i),
+    ).toBeInTheDocument();
+
+    // Clearing it leaves no badge behind.
+    act(() =>
+      hub.emit("ops:fleet", "serviceError", {
+        service: "web",
+        instanceId: "i-0001",
+        lastError: null,
+        lastErrorAt: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(within(rowFor("web")).queryByLabelText(/reconcile error/i)).toBeNull(),
+    );
+  });
+
   it("shows the latest error details in the indicator tooltip", async () => {
     const user = userEvent.setup();
     mock.onGet("/mgmt/services").reply(200, [ERRORED]);

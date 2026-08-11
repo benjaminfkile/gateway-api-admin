@@ -296,6 +296,43 @@ describe("useLiveResource", () => {
     expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
+  // FINDING 3 (task 610): a page whose event channel carries no heartbeats
+  // (DeploysPage on "ops:deploys") must still read live from the "ops:fleet"
+  // heartbeat — otherwise an idle system reads offline forever and fast-polls.
+  it("sources liveness from ops:fleet even when the event channel is silent", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ n: 1 });
+    render(
+      <Probe
+        fetcher={fetcher}
+        options={{ channel: "ops:deploys", events: {}, pollMs: POLL }}
+      />,
+    );
+    await flush();
+    // Connected but no ops:deploys events: still offline until a heartbeat lands.
+    expect(screen.getByTestId("live")).toHaveTextContent("offline");
+    // The liveness channel is joined even though it is not the event channel.
+    expect(hub.joinChannel).toHaveBeenCalledWith("ops:fleet");
+
+    // A heartbeat on ops:fleet alone (nothing on ops:deploys) flips the dot live.
+    await act(async () => {
+      hub.emit("ops:fleet", "heartbeat", {});
+    });
+    expect(screen.getByTestId("live")).toHaveTextContent("live");
+  });
+
+  it("does not double-join when the event channel is already the liveness channel", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ n: 1 });
+    render(
+      <Probe
+        fetcher={fetcher}
+        options={{ channel: "ops:fleet", events: {}, pollMs: POLL }}
+      />,
+    );
+    await flush();
+    const fleetJoins = hub.joinChannel.mock.calls.filter((c) => c[0] === "ops:fleet");
+    expect(fleetJoins).toHaveLength(1);
+  });
+
   // FINDING 2: a slow in-flight poll response must not overwrite newer state a
   // live event just patched (deploy flips done -> reverts to in_progress).
   it("discards a stale in-flight fetch that a mid-flight event superseded", async () => {

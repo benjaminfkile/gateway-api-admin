@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getLastEventAt } from "../lib/hubClient";
+import {
+  getLastEventAt,
+  joinChannel,
+  leaveChannel,
+  onChannelEvent,
+} from "../lib/hubClient";
 import { useOpsChannel } from "./useOpsChannel";
+
+/**
+ * Default channel liveness keys off. Heartbeats are published only on
+ * "ops:fleet", so every page — even ones subscribed to a non-heartbeat event
+ * channel like "ops:deploys" — sources its live dot from here unless it opts out
+ * (finding 3). A page keyed to a silent channel would otherwise read offline
+ * forever and fast-poll indefinitely on an idle system.
+ */
+export const DEFAULT_LIVENESS_CHANNEL = "ops:fleet";
 
 /**
  * Liveness window: a channel is "live" only if a ChannelEvent (heartbeat or
@@ -26,6 +40,13 @@ export type LiveReducer<T> = (prev: T, data: Record<string, unknown>) => T;
 export interface UseLiveResourceOptions<T> {
   /** Hub channel to subscribe to (e.g. "ops:fleet", "ops:deploys"). */
   channel: string;
+  /**
+   * Channel whose events prove liveness (drive the dot and the reconcile/fallback
+   * cadence). Defaults to {@link DEFAULT_LIVENESS_CHANNEL} ("ops:fleet"), the only
+   * channel carrying heartbeats. Event SUBSCRIPTION stays on `channel`; when the
+   * two differ the hook also joins this channel purely to source freshness.
+   */
+  livenessChannel?: string;
   /** Per-event reducers; an event with no entry here only proves freshness. */
   events?: Record<string, LiveReducer<T>>;
   /**
@@ -81,6 +102,7 @@ export function useLiveResource<T>(
   options: UseLiveResourceOptions<T>,
 ): UseLiveResource<T> {
   const { channel } = options;
+  const livenessChannel = options.livenessChannel ?? DEFAULT_LIVENESS_CHANNEL;
 
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,8 +121,6 @@ export function useLiveResource<T>(
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveRef = useRef(false);
   const connectedRef = useRef(false);
-  // Raw last-event timestamp; mirrored from the hub tap. Not state (finding 4).
-  const lastEventAtRef = useRef<number | null>(getLastEventAt(channel));
   // Mirror of `data` readable synchronously inside the event handler, so a
   // reducer folds onto the latest committed value even between renders.
   const dataRef = useRef<T | null>(null);
@@ -161,15 +181,19 @@ export function useLiveResource<T>(
   // Re-evaluate the derived `live` boolean from the current refs and flip state
   // only when it actually changes — the render-cheap heart of finding 4.
   const recomputeLive = useCallback(() => {
+    // Liveness is sourced from the (heartbeat-bearing) liveness channel, read
+    // straight from the hub tap so a separate liveness channel stays honest even
+    // when the event channel is silent (finding 3).
+    const last = getLastEventAt(livenessChannel);
     const next =
       connectedRef.current &&
-      lastEventAtRef.current !== null &&
-      Date.now() - lastEventAtRef.current < LIVENESS_WINDOW_MS;
+      last !== null &&
+      Date.now() - last < LIVENESS_WINDOW_MS;
     if (next !== liveRef.current) {
       liveRef.current = next;
       setLiveState(next);
     }
-  }, []);
+  }, [livenessChannel]);
 
   // (Re)arm the recurring poll from now, at the cadence liveness currently
   // dictates. Called only at legitimate reset points — mount, a cadence change,
@@ -211,14 +235,31 @@ export function useLiveResource<T>(
         }
         // Some events carry too little to patch a composite row from; refetch.
         if (opts.refetchOn?.includes(event)) void runFetch();
-        // The hub already stamped lastEventAt for this channel; mirror it into
-        // the ref and re-evaluate liveness (may flip the dot to green).
-        lastEventAtRef.current = getLastEventAt(channel) ?? Date.now();
+        // An event on the subscribed channel may itself prove freshness (when it
+        // IS the liveness channel); re-evaluate the dot from the hub tap.
         recomputeLive();
       },
-      [channel, recomputeLive, runFetch],
+      [recomputeLive, runFetch],
     ),
   );
+
+  // Liveness subscription (finding 3): when the liveness channel differs from the
+  // event channel, join it too so its heartbeats stamp the hub tap and flip the
+  // dot promptly. When they are the same, the primary subscription above already
+  // covers it — skip to avoid a redundant join/leave.
+  useEffect(() => {
+    if (livenessChannel === channel) return;
+    let active = true;
+    const unsub = onChannelEvent(livenessChannel, () => {
+      if (active) recomputeLive();
+    });
+    void joinChannel(livenessChannel).catch(() => {});
+    return () => {
+      active = false;
+      unsub();
+      void leaveChannel(livenessChannel).catch(() => {});
+    };
+  }, [livenessChannel, channel, recomputeLive]);
 
   // Re-arm the poll whenever the cadence it should run at changes: either
   // liveness flipped (reconcile ⇄ fallback) or the caller tightened/loosened a
@@ -250,7 +291,6 @@ export function useLiveResource<T>(
   // Mount: immediate fetch, then start polling; pause/resume on tab visibility.
   useEffect(() => {
     activeRef.current = true;
-    lastEventAtRef.current = getLastEventAt(channel);
     recomputeLive();
     void runFetch().finally(() => {
       if (activeRef.current) schedulePoll();
@@ -285,10 +325,10 @@ export function useLiveResource<T>(
     error,
     refresh,
     live: liveState,
-    // Exposed via a getter reading the ref so tooltips see the latest timestamp
-    // without the hook re-rendering the page on every event (finding 4).
+    // Exposed via a getter reading the hub tap so tooltips see the latest
+    // timestamp without the hook re-rendering the page on every event (finding 4).
     get lastEventAt() {
-      return lastEventAtRef.current;
+      return getLastEventAt(livenessChannel);
     },
   };
 }

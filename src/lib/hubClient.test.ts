@@ -233,6 +233,79 @@ describe("supervisor", () => {
   });
 });
 
+describe("sign-out lifecycle races", () => {
+  it("a join parked during a reconnect does not restart the socket after sign-out (finding 1)", async () => {
+    const fake = useFake();
+    await ensureStarted();
+    await joinChannel("ops:fleet");
+
+    // A SignalR-driven reconnect is under way: a fresh join parks in
+    // ensureStarted's wait-for-state loop (no startPromise it owns).
+    fake.state = HubConnectionState.Reconnecting;
+    const parked = joinChannel("ops:deploys");
+    // Attach the rejection handler up front so the later reject is never "unhandled".
+    const parkedResult = parked.then(
+      () => "resolved",
+      (err: Error) => err,
+    );
+
+    // Sign-out stops the connection while the join is still parked. The parked
+    // waiter must bail — not resume and call start() on the detached socket,
+    // resurrecting a signed-out connection with a stale token.
+    await stopConnection();
+
+    const outcome = await parkedResult;
+    expect(outcome).toBeInstanceOf(Error);
+    // The stopped socket was never restarted.
+    expect(fake.startCount).toBe(1);
+    expect(getConnectionState()).toBe(HubConnectionState.Disconnected);
+  });
+});
+
+describe("join/leave interleave (finding 2)", () => {
+  it("aborts a JoinChannel that was left while parked awaiting a connection", async () => {
+    const fake = useFake();
+    fake.manualStart = true;
+
+    // The first caller kicks off the start (socket now Connecting); a join parks
+    // awaiting that start to settle.
+    const started = ensureStarted();
+    const joining = joinChannel("ops:deploys");
+
+    // An unmount during the transition leaves the channel before it is Connected.
+    await leaveChannel("ops:deploys");
+
+    fake.resolveStart();
+    await Promise.all([started, joining]);
+
+    // The parked join must NOT land a JoinChannel the server would keep with no
+    // subscriber; the pending leave is flushed instead.
+    expect(fake.invoke).not.toHaveBeenCalledWith("JoinChannel", "ops:deploys");
+    expect(fake.invoke).toHaveBeenCalledWith("LeaveChannel", "ops:deploys");
+  });
+
+  it("flushes a pending leave and does not rejoin it after a reconnect", async () => {
+    const fake = useFake();
+    await ensureStarted();
+    await joinChannel("ops:fleet");
+
+    // The socket is Reconnecting: a leave now cannot reach the server, so it is
+    // recorded as pending.
+    fake.state = HubConnectionState.Reconnecting;
+    await leaveChannel("ops:fleet");
+
+    fake.invoke.mockClear();
+    fake.triggerReconnected();
+
+    // The reconnect flushes the pending leave (LeaveChannel) and must not rejoin
+    // the left channel.
+    await vi.waitFor(() =>
+      expect(fake.invoke).toHaveBeenCalledWith("LeaveChannel", "ops:fleet"),
+    );
+    expect(fake.invoke).not.toHaveBeenCalledWith("JoinChannel", "ops:fleet");
+  });
+});
+
 describe("wake/online recovery", () => {
   it("an online event kicks the supervisor when not Connected", async () => {
     const fake = useFake();

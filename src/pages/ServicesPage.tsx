@@ -235,7 +235,12 @@ export function applyServiceError(
     };
     fleet.errorOn = Math.max(fleet.errorOn ?? 0, 1);
   } else {
+    // Finding 6: a cleared error must drop BOTH the detail and the count.
+    // Zeroing errorOn hides the warning badge immediately; leaving it >= 1 kept a
+    // phantom badge on a healthy service until the next reconcile poll. The poll
+    // still settles the exact count if other instances remain unhealthy.
     fleet.latestError = undefined;
+    fleet.errorOn = 0;
   }
   return services.map((s, k) => (k === idx ? { ...s, fleet } : s));
 }

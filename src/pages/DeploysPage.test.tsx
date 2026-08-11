@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import MockAdapter from "axios-mock-adapter";
@@ -304,6 +304,127 @@ describe("DeploysPage", () => {
     expect(listGets()).toBe(4);
   });
 
+  // FINDING 5: a burst of deployInstance events must coalesce into ONE trailing
+  // detail GET rather than firing one GET per event (a 10-instance rollout
+  // otherwise fires ~30 GETs in seconds).
+  it("coalesces a burst of deployInstance events into a single detail GET", async () => {
+    vi.useFakeTimers();
+    const detail: DeployDetail = {
+      ...IN_PROGRESS,
+      instances: [
+        { instanceId: "i-0001", status: "updating", detail: null, updatedAt: "2026-08-03T00:00:10Z" },
+      ],
+    };
+    mock.onGet("/mgmt/deploys").reply(200, [IN_PROGRESS]);
+    mock.onGet("/mgmt/deploys/d-2").reply(200, detail);
+    renderPage();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const table = screen.getByRole("table", { name: "deploy history" });
+    await act(async () => {
+      fireEvent.click(within(rowFor(table, "worker")).getByText("worker"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const detailGets = () =>
+      mock.history.get.filter((g) => g.url === "/mgmt/deploys/d-2").length;
+    // Opening fetched the detail once (immediate, not debounced).
+    expect(detailGets()).toBe(1);
+
+    // A burst of five deployInstance events within the debounce window.
+    await act(async () => {
+      for (let i = 0; i < 5; i++) {
+        hub.emit("ops:deploys", "deployInstance", {
+          deployId: "d-2",
+          instanceId: `i-000${i}`,
+          status: "converged",
+          error: null,
+        });
+      }
+      // Still inside the 300ms trailing window: no new GET yet.
+      await vi.advanceTimersByTimeAsync(299);
+    });
+    expect(detailGets()).toBe(1);
+
+    // Once the burst goes quiet, exactly one trailing GET fires — not five.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(detailGets()).toBe(2);
+  });
+
+  // FINDING 5: a slow, older detail GET that resolves out of order must not
+  // overwrite the newer response (a sequence guard on setDetail).
+  it("drops a stale out-of-order detail response", async () => {
+    vi.useFakeTimers();
+    const twoOfThree: DeployDetail = {
+      ...IN_PROGRESS,
+      instances: [
+        { instanceId: "i-0001", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:10Z" },
+        { instanceId: "i-0002", status: "converged", detail: null, updatedAt: "2026-08-03T00:00:12Z" },
+        { instanceId: "i-0003", status: "updating", detail: "pulling", updatedAt: "2026-08-03T00:00:14Z" },
+      ],
+    };
+    const threeOfThree: DeployDetail = {
+      ...IN_PROGRESS,
+      instances: twoOfThree.instances.map((i) => ({ ...i, status: "converged", detail: null })),
+    };
+
+    const resolvers: Array<(v: [number, DeployDetail]) => void> = [];
+    mock.onGet("/mgmt/deploys").reply(200, [IN_PROGRESS]);
+    mock.onGet("/mgmt/deploys/d-2").reply(
+      () => new Promise((resolve) => resolvers.push(resolve)),
+    );
+    renderPage();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const table = screen.getByRole("table", { name: "deploy history" });
+    await act(async () => {
+      fireEvent.click(within(rowFor(table, "worker")).getByText("worker"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // resolvers[0] is the open fetch: resolve it with 2/3.
+    await act(async () => {
+      resolvers[0]([200, twoOfThree]);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const panel = screen.getByRole("region", { name: /deploy d-2 detail/i });
+    expect(within(panel).getByText("2/3 instances converged")).toBeInTheDocument();
+
+    // Burst A → one debounced fetch (resolvers[1]); leave it in flight (slow).
+    await act(async () => {
+      hub.emit("ops:deploys", "deployInstance", { deployId: "d-2", instanceId: "i-0003", status: "converged", error: null });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    // Burst B → a newer debounced fetch (resolvers[2]).
+    await act(async () => {
+      hub.emit("ops:deploys", "deployInstance", { deployId: "d-2", instanceId: "i-0003", status: "converged", error: null });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(resolvers).toHaveLength(3);
+
+    // The NEWER fetch (B) resolves first with 3/3.
+    await act(async () => {
+      resolvers[2]([200, threeOfThree]);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(within(panel).getByText("3/3 instances converged")).toBeInTheDocument();
+
+    // The OLDER fetch (A) resolves late with the now-stale 2/3: it must be
+    // discarded — the panel stays at 3/3.
+    await act(async () => {
+      resolvers[1]([200, twoOfThree]);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(within(panel).getByText("3/3 instances converged")).toBeInTheDocument();
+  });
+
   it("filters by service and by status, client-side", async () => {
     const user = userEvent.setup();
     mock.onGet("/mgmt/deploys").reply(200, [DONE, IN_PROGRESS, FAILED]);
@@ -375,5 +496,38 @@ describe("applyDeployEvent", () => {
 
   it("returns the same reference when the event names no deploy", () => {
     expect(applyDeployEvent(list, {})).toBe(list);
+  });
+
+  // FINDING 4: a terminal event for an unseen deploy must not borrow finishedAt
+  // (or Date.now()) as a fake start — that rendered 0-second deploys whose
+  // "Started" was really the finish time.
+  it("does not fake startedAt from finishedAt for an unseen terminal deploy", () => {
+    const next = applyDeployEvent(list, {
+      deployId: "d-TERMINAL",
+      service: "api",
+      toDigest: "sha256:dddddddddddd",
+      status: "failed",
+      finishedAt: "2026-08-03T00:09:00Z",
+      error: "boom",
+    });
+    const row = next.find((d) => d.id === "d-TERMINAL");
+    expect(row).toBeDefined();
+    expect(row?.startedAt).not.toBe("2026-08-03T00:09:00Z");
+    // Absent start renders as a dash rather than a bogus timestamp.
+    expect(row?.startedAt).toBe("");
+  });
+
+  it("uses the event's own startedAt for an unseen deploy when present", () => {
+    const next = applyDeployEvent(list, {
+      deployId: "d-WITHSTART",
+      service: "api",
+      toDigest: "sha256:eeeeeeeeeeee",
+      status: "in_progress",
+      startedAt: "2026-08-03T00:08:00Z",
+      finishedAt: null,
+    });
+    expect(next.find((d) => d.id === "d-WITHSTART")?.startedAt).toBe(
+      "2026-08-03T00:08:00Z",
+    );
   });
 });

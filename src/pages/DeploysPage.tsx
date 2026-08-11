@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -42,6 +42,14 @@ const POLL_ACTIVE_MS = 5_000;
 const POLL_IDLE_MS = 30_000;
 /** Slow reconcile cadence used while live events are proving freshness. */
 const POLL_RECONCILE_MS = 60_000;
+/**
+ * Trailing-debounce window for the open deploy's detail refetch. A rollout fires
+ * a burst of `deployInstance` events (one per instance per transition); without
+ * coalescing a 10-instance rollout would fire ~30 detail GETs in seconds. One
+ * trailing fetch per quiet gap is enough — the detail always reflects the latest
+ * state (finding 5).
+ */
+const DETAIL_REFETCH_DEBOUNCE_MS = 300;
 
 const STATUS_CHIP: Record<
   DeployStatus,
@@ -72,6 +80,14 @@ function StatusChip({ status }: { status: DeployStatus }) {
 /** First 12 chars of a digest, or an em dash when absent. */
 export function shortDigest(digest: string | null): string {
   return digest ? digest.slice(0, 12) : "—";
+}
+
+/**
+ * Relative "started" label, or an em dash when the start time is unknown — a
+ * best-effort row from an event with no `startedAt` (finding 4).
+ */
+export function startedLabel(startedAt: string): string {
+  return startedAt ? formatRelative(startedAt) : "—";
 }
 
 /** Elapsed time between two ISO timestamps as a compact "1m 5s" string. */
@@ -158,7 +174,11 @@ export function applyDeployEvent(
     actor: (data.actor as string) ?? "",
     action: (data.action as string) ?? "deploy",
     status: (data.status as DeployStatus) ?? "in_progress",
-    startedAt: (data.finishedAt as string | null) ?? new Date().toISOString(),
+    // Finding 4: use the event's own startedAt when present, else leave it blank
+    // (rendered as a dash) and let the fallback poll reconcile. Never borrow
+    // finishedAt or Date.now() as a fake start — a terminal event would otherwise
+    // render a 0-second deploy whose Started time is really its finish time.
+    startedAt: (data.startedAt as string | undefined) ?? "",
     finishedAt: (data.finishedAt as string | null) ?? null,
     error: (data.error as string | null) ?? null,
   };
@@ -217,7 +237,7 @@ function DeployDetailPanel({
         </Stack>
         <DigestArrow deploy={summary} />
         <Typography variant="body2" color="text.secondary">
-          Started {formatRelative(summary.startedAt)} ·{" "}
+          Started {startedLabel(summary.startedAt)} ·{" "}
           {formatDuration(summary.startedAt, summary.finishedAt)}
         </Typography>
       </Stack>
@@ -310,6 +330,11 @@ export default function DeploysPage() {
   const [detail, setDetail] = useState<DeployDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  // Ordering guard (finding 5): only the newest detail fetch may commit, so a
+  // slow older GET cannot overwrite a newer response out of order.
+  const detailFetchSeqRef = useRef(0);
+  // Trailing-debounce timer for event-driven detail refetches (finding 5).
+  const detailRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Adaptive fallback cadence: 5s while a visible rollout is converging, 30s
   // otherwise. Derived from the list below and fed back into the resource — the
@@ -356,17 +381,47 @@ export default function DeploysPage() {
   }, [deploys]);
 
   const loadDetail = useCallback(async (id: string) => {
+    const mySeq = ++detailFetchSeqRef.current;
     setDetailLoading(true);
     try {
       const data = await deploysApi.get(id);
+      // A newer detail fetch has since started; drop this stale response so it
+      // cannot overwrite the newer one out of order (finding 5).
+      if (mySeq !== detailFetchSeqRef.current) return;
       setDetail(data);
       setDetailError(null);
     } catch (err) {
+      if (mySeq !== detailFetchSeqRef.current) return;
       setDetailError(err instanceof Error ? err.message : "Failed to load deploy");
     } finally {
-      setDetailLoading(false);
+      if (mySeq === detailFetchSeqRef.current) setDetailLoading(false);
     }
   }, []);
+
+  /** Clear any pending trailing detail refetch. */
+  const clearDetailRefetch = useCallback(() => {
+    if (detailRefetchTimerRef.current) {
+      clearTimeout(detailRefetchTimerRef.current);
+      detailRefetchTimerRef.current = null;
+    }
+  }, []);
+
+  // Coalesce a burst of `deployInstance` events into a single trailing detail
+  // fetch (finding 5): each event resets the timer, so the GET fires once the
+  // burst goes quiet rather than once per event.
+  const scheduleDetailRefetch = useCallback(
+    (id: string) => {
+      clearDetailRefetch();
+      detailRefetchTimerRef.current = setTimeout(() => {
+        detailRefetchTimerRef.current = null;
+        void loadDetail(id);
+      }, DETAIL_REFETCH_DEBOUNCE_MS);
+    },
+    [clearDetailRefetch, loadDetail],
+  );
+
+  // Drop any pending debounced refetch when the component unmounts.
+  useEffect(() => clearDetailRefetch, [clearDetailRefetch]);
 
   const openDeploy = (deploy: DeploySummary) => {
     setSelectedId(deploy.id);
@@ -377,6 +432,7 @@ export default function DeploysPage() {
   };
 
   const closeDeploy = () => {
+    clearDetailRefetch();
     setSelectedId(null);
     setSelectedSnapshot(null);
     setDetail(null);
@@ -398,9 +454,9 @@ export default function DeploysPage() {
     (event: string, data: ChannelEventData) => {
       if (event !== "deployInstance") return;
       const id = data.deployId as string | undefined;
-      if (id) loadDetail(id);
+      if (id) scheduleDetailRefetch(id);
     },
-    [loadDetail],
+    [scheduleDetailRefetch],
   );
 
   useDeployProgress(selectedId, onDeployEvent);
@@ -527,9 +583,13 @@ export default function DeploysPage() {
                       <DigestArrow deploy={deploy} />
                     </TableCell>
                     <TableCell>
-                      <Tooltip title={new Date(deploy.startedAt).toLocaleString()}>
-                        <span>{formatRelative(deploy.startedAt)}</span>
-                      </Tooltip>
+                      {deploy.startedAt ? (
+                        <Tooltip title={new Date(deploy.startedAt).toLocaleString()}>
+                          <span>{formatRelative(deploy.startedAt)}</span>
+                        </Tooltip>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                     <TableCell>
                       {formatDuration(deploy.startedAt, deploy.finishedAt)}

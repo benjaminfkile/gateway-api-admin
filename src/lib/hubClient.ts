@@ -106,6 +106,15 @@ const stateListeners = new Set<ConnectionStateListener>();
 const joinedChannels = new Set<string>();
 
 /**
+ * Channels a leaveChannel could not send to the server because the socket was
+ * not Connected at the time. The JoinChannel for such a channel may already be
+ * (or may still land) on the server, so onreconnected/restart flushes these with
+ * a LeaveChannel before rejoining — otherwise an unmount-during-reconnect leaves
+ * a server group with no subscriber and no path that ever leaves it (finding 2).
+ */
+const pendingLeaves = new Set<string>();
+
+/**
  * Wall-clock time (ms) of the most recent ChannelEvent seen on each joined
  * channel — heartbeats included. This is the end-to-end-delivery proof the UI
  * uses for liveness: a "green but deaf" connection (Connected yet silent) reads
@@ -180,6 +189,17 @@ export function getConnectionState(): HubConnectionState {
 async function rejoinChannels(): Promise<void> {
   const conn = connection;
   if (!conn || conn.state !== HubConnectionState.Connected) return;
+  // Flush leaves that could not be sent while offline first: a JoinChannel that
+  // landed before the (unsendable) leave must be undone on the server, and this
+  // must run before the rejoin loop so a still-registered channel is not skipped.
+  for (const channel of [...pendingLeaves]) {
+    try {
+      await conn.invoke("LeaveChannel", channel);
+      pendingLeaves.delete(channel);
+    } catch {
+      // Retried on the next reconnect/supervisor tick; keep it pending.
+    }
+  }
   for (const channel of joinedChannels) {
     try {
       await conn.invoke("JoinChannel", channel);
@@ -199,6 +219,14 @@ async function rejoinChannels(): Promise<void> {
 export async function ensureStarted(): Promise<HubConnection> {
   const conn = getConnection();
   for (;;) {
+    // Currency guard (finding 1): re-checked at the top of every iteration, so
+    // after each await below a waiter that parked across a reconnect verifies the
+    // captured `conn` is still the module's current connection and no intentional
+    // stop (sign-out) happened. A parked join resuming after stopConnection() must
+    // NOT call start() on the detached socket and resurrect a signed-out session.
+    if (conn !== connection || intentionalStop) {
+      throw new Error("hub connection was superseded");
+    }
     switch (conn.state) {
       case HubConnectionState.Connected:
         return conn;
@@ -317,6 +345,7 @@ export async function stopConnection(): Promise<void> {
     supervisorTimer = null;
   }
   joinedChannels.clear();
+  pendingLeaves.clear();
   lastEventAt.clear();
   try {
     if (conn) {
@@ -338,16 +367,29 @@ export async function stopConnection(): Promise<void> {
  */
 export async function joinChannel(channel: string): Promise<void> {
   joinedChannels.add(channel);
+  pendingLeaves.delete(channel);
   const conn = await ensureStarted();
+  // Re-check the registry after parking on ensureStarted (finding 2): if the
+  // channel was left while we waited for a connection, do not invoke a
+  // JoinChannel the server would keep with no subscriber and no matching leave.
+  if (!joinedChannels.has(channel)) return;
   await conn.invoke("JoinChannel", channel);
 }
 
-/** Leave a channel and stop re-joining it. Best-effort when already offline. */
+/**
+ * Leave a channel and stop re-joining it. When the socket is not Connected the
+ * server invoke cannot be sent, so the channel is recorded as a pending leave
+ * that onreconnected/restart flushes — a JoinChannel that lands later must still
+ * be undone rather than orphaning a server group (finding 2).
+ */
 export async function leaveChannel(channel: string): Promise<void> {
   joinedChannels.delete(channel);
   const conn = connection;
   if (conn && conn.state === HubConnectionState.Connected) {
+    pendingLeaves.delete(channel);
     await conn.invoke("LeaveChannel", channel);
+  } else {
+    pendingLeaves.add(channel);
   }
 }
 
@@ -385,6 +427,7 @@ export const __testing = {
     startPromise = null;
     stateListeners.clear();
     joinedChannels.clear();
+    pendingLeaves.clear();
     lastEventAt.clear();
     supervisorActive = false;
     supervisorAttempts = 0;
@@ -396,4 +439,5 @@ export const __testing = {
   },
   kickSupervisor,
   joinedChannels,
+  pendingLeaves,
 };

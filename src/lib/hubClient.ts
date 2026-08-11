@@ -1,4 +1,5 @@
 import {
+  HttpTransportType,
   type HubConnection,
   HubConnectionBuilder,
   HubConnectionState,
@@ -87,6 +88,17 @@ export function buildHubConnection(): HubConnection {
     .withUrl(HUB_URL, {
       // Cognito bearer token; SignalR re-invokes this on every (re)connect.
       accessTokenFactory: async () => (await getAccessToken()) ?? "",
+      // WebSockets-only with the negotiate round-trip skipped. The gateway runs
+      // as a MULTI-INSTANCE fleet behind a load balancer with no sticky
+      // sessions: a negotiated connection id is only valid on the instance that
+      // issued it, so the follow-up WebSocket open 404s whenever the LB routes
+      // it to the other node (~50% of attempts — the "sometimes green after
+      // waiting, then stuck off" symptom). Skipping negotiation makes the
+      // WebSocket the ONE and only request, so whichever instance accepts it
+      // owns the connection outright. The Redis backplane handles cross-node
+      // event fan-out; per-connection stickiness is only a negotiate problem.
+      skipNegotiation: true,
+      transport: HttpTransportType.WebSockets,
     })
     .withAutomaticReconnect(reconnectPolicy)
     // Information in dev so the reconnect narrative is visible in the console;

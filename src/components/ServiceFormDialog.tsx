@@ -140,12 +140,13 @@ export default function ServiceFormDialog({
       desiredStatus: form.desiredStatus,
     };
 
-    // Only send the ref when set, so submitting a blank field never overwrites
-    // an existing secret ref with junk. Send only the reference, never values.
-    const envSecretRef = form.envSecretRef.trim();
-    if (envSecretRef) {
-      payload.envSecretRef = envSecretRef;
-    }
+    // The gateway's upsert is tri-state for envSecretRef (absent = preserve,
+    // empty string = clear, non-empty = set). This form always displays the
+    // current value, so the field's content IS the user's intent — send it
+    // verbatim: a blank field explicitly clears the stored ref, matching what
+    // the user sees. (Omitting it would silently preserve a ref the user just
+    // deleted.) Send only the reference, never secret values.
+    payload.envSecretRef = form.envSecretRef.trim();
 
     setBusy(true);
     setApiError(null);

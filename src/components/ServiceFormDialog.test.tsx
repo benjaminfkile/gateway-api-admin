@@ -75,6 +75,7 @@ describe("ServiceFormDialog", () => {
       port: 9090,
       includeInHealth: true,
       desiredStatus: "running",
+      envSecretRef: "",
     });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
@@ -109,7 +110,11 @@ describe("ServiceFormDialog", () => {
     });
   });
 
-  it("omits envSecretRef from the payload when left blank", async () => {
+  it("sends an explicit empty envSecretRef when left blank (tri-state clear)", async () => {
+    // The gateway's upsert preserves envSecretRef when the field is ABSENT and
+    // clears it on an empty string. The dialog always shows the current value,
+    // so a blank field is the user's intent to clear — it must be sent as ""
+    // rather than omitted (omitting would silently keep a just-deleted ref).
     const user = userEvent.setup();
     mock.onPut("/mgmt/services/api").reply(200, {});
     renderDialog();
@@ -120,8 +125,9 @@ describe("ServiceFormDialog", () => {
     await user.click(screen.getByRole("button", { name: /save/i }));
 
     await waitFor(() => expect(mock.history.put).toHaveLength(1));
-    expect(JSON.parse(mock.history.put[0].data)).not.toHaveProperty(
+    expect(JSON.parse(mock.history.put[0].data)).toHaveProperty(
       "envSecretRef",
+      "",
     );
   });
 
@@ -202,6 +208,7 @@ describe("ServiceFormDialog", () => {
         port: 8080,
         includeInHealth: true,
         desiredStatus: "running",
+        envSecretRef: "",
       });
       await waitFor(() => expect(onClose).toHaveBeenCalled());
     });
@@ -222,7 +229,10 @@ describe("ServiceFormDialog", () => {
       });
     });
 
-    it("omits the env secret ref when cleared in edit mode", async () => {
+    it("sends an empty env secret ref when cleared in edit mode (tri-state clear)", async () => {
+      // Clearing the field must reach the gateway as an explicit "" — the
+      // upsert preserves the stored ref when the field is ABSENT, so omitting
+      // it here would silently keep the ref the user just deleted.
       const user = userEvent.setup();
       mock.onPut("/mgmt/services/web").reply(200, {});
       renderDialog(vi.fn(), { ...existingService, envSecretRef: "prod/web/env" });
@@ -231,8 +241,9 @@ describe("ServiceFormDialog", () => {
       await user.click(screen.getByRole("button", { name: /save/i }));
 
       await waitFor(() => expect(mock.history.put).toHaveLength(1));
-      expect(JSON.parse(mock.history.put[0].data)).not.toHaveProperty(
+      expect(JSON.parse(mock.history.put[0].data)).toHaveProperty(
         "envSecretRef",
+        "",
       );
     });
   });

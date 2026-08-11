@@ -228,19 +228,28 @@ export function applyServiceError(
   const target = services[idx];
   const fleet = { ...target.fleet };
   if (lastError) {
+    // A set event for an instance that already owned latestError replaces the
+    // message without inflating the count; a different instance means one more
+    // erroring instance than we knew about.
+    const sameInstance = fleet.latestError?.instanceId === instanceId;
     fleet.latestError = {
       instanceId,
       message: lastError,
       at: lastErrorAt ?? new Date().toISOString(),
     };
-    fleet.errorOn = Math.max(fleet.errorOn ?? 0, 1);
+    fleet.errorOn = sameInstance
+      ? Math.max(fleet.errorOn ?? 0, 1)
+      : (fleet.errorOn ?? 0) + 1;
   } else {
-    // Finding 6: a cleared error must drop BOTH the detail and the count.
-    // Zeroing errorOn hides the warning badge immediately; leaving it >= 1 kept a
-    // phantom badge on a healthy service until the next reconcile poll. The poll
-    // still settles the exact count if other instances remain unhealthy.
-    fleet.latestError = undefined;
-    fleet.errorOn = 0;
+    // Review finding: this event proves ONE instance cleared, not the fleet.
+    // Zeroing the aggregate hid a still-broken instance behind a healthy grid
+    // for up to a reconcile interval — strictly worse than the phantom badge it
+    // replaced. Decrement instead, and drop latestError only when it described
+    // THIS instance; the reconcile poll settles the exact count either way.
+    fleet.errorOn = Math.max((fleet.errorOn ?? 0) - 1, 0);
+    if (fleet.latestError?.instanceId === instanceId) {
+      fleet.latestError = undefined;
+    }
   }
   return services.map((s, k) => (k === idx ? { ...s, fleet } : s));
 }

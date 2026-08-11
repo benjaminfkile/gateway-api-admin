@@ -153,20 +153,22 @@ describe("ServicesPage", () => {
     ).toBeNull();
   });
 
-  // FINDING 6: a serviceError event reporting the error resolved (lastError null)
-  // must clear BOTH the detail and the count, so no phantom warning badge lingers
-  // on a healthy service.
-  it("clears the reconcile-error badge when a serviceError event reports it resolved", async () => {
+  // Review finding (supersedes finding 6's zeroing fix): a serviceError clear
+  // event proves ONE instance recovered, not the fleet — errorOn: 2 minus one
+  // clear must leave the badge up for the still-broken instance (zeroing hid a
+  // real error behind a healthy grid for up to a reconcile interval), and only
+  // the LAST clear removes it.
+  it("decrements the reconcile-error badge per clearing instance, removing it only at zero", async () => {
     mock.onGet("/mgmt/services").reply(200, [ERRORED]);
     renderPage();
 
     await screen.findByText("api");
-    // Starts errored: the badge is present.
+    // Starts errored on 2 instances: the badge is present.
     expect(
       within(rowFor("api")).getByLabelText(/reconcile error on/i),
     ).toBeInTheDocument();
 
-    // A clearing event (lastError null) resolves the error for that service.
+    // One instance clears: the badge must REMAIN (another instance still errors).
     act(() =>
       hub.emit("ops:fleet", "serviceError", {
         service: "api",
@@ -175,8 +177,19 @@ describe("ServicesPage", () => {
         lastErrorAt: null,
       }),
     );
+    expect(
+      within(rowFor("api")).getByLabelText(/reconcile error on/i),
+    ).toBeInTheDocument();
 
-    // The badge disappears — errorOn was zeroed, not left dangling at 2.
+    // The second (last) erroring instance clears: the badge disappears.
+    act(() =>
+      hub.emit("ops:fleet", "serviceError", {
+        service: "api",
+        instanceId: "i-0deadbee",
+        lastError: null,
+        lastErrorAt: null,
+      }),
+    );
     await waitFor(() =>
       expect(
         within(rowFor("api")).queryByLabelText(/reconcile error/i),

@@ -380,25 +380,7 @@ export default function DeploysPage() {
     return Array.from(set).sort();
   }, [deploys]);
 
-  const loadDetail = useCallback(async (id: string) => {
-    const mySeq = ++detailFetchSeqRef.current;
-    setDetailLoading(true);
-    try {
-      const data = await deploysApi.get(id);
-      // A newer detail fetch has since started; drop this stale response so it
-      // cannot overwrite the newer one out of order (finding 5).
-      if (mySeq !== detailFetchSeqRef.current) return;
-      setDetail(data);
-      setDetailError(null);
-    } catch (err) {
-      if (mySeq !== detailFetchSeqRef.current) return;
-      setDetailError(err instanceof Error ? err.message : "Failed to load deploy");
-    } finally {
-      if (mySeq === detailFetchSeqRef.current) setDetailLoading(false);
-    }
-  }, []);
-
-  /** Clear any pending trailing detail refetch. */
+  /** Clear any pending coalesced detail refetch. */
   const clearDetailRefetch = useCallback(() => {
     if (detailRefetchTimerRef.current) {
       clearTimeout(detailRefetchTimerRef.current);
@@ -406,18 +388,50 @@ export default function DeploysPage() {
     }
   }, []);
 
-  // Coalesce a burst of `deployInstance` events into a single trailing detail
-  // fetch (finding 5): each event resets the timer, so the GET fires once the
-  // burst goes quiet rather than once per event.
+  const loadDetail = useCallback(
+    async (id: string) => {
+      // Every direct load supersedes any queued event-driven refetch (review
+      // finding): a stale timer armed for the PREVIOUS deploy would otherwise
+      // fire after openDeploy's fetch, win the seq race as the newest fetch, and
+      // render the old deploy's instances under the new deploy's header.
+      // Cancelling here removes the whole remember-to-clear class — no call
+      // site can forget it.
+      clearDetailRefetch();
+      const mySeq = ++detailFetchSeqRef.current;
+      // The spinner is flipped on by openDeploy (the user-initiated path) only;
+      // background event-driven refreshes must not churn two renders per cycle
+      // for a flag the UI only shows while `detail` is null (review finding).
+      try {
+        const data = await deploysApi.get(id);
+        // A newer detail fetch has since started; drop this stale response so it
+        // cannot overwrite the newer one out of order (finding 5).
+        if (mySeq !== detailFetchSeqRef.current) return;
+        setDetail(data);
+        setDetailError(null);
+      } catch (err) {
+        if (mySeq !== detailFetchSeqRef.current) return;
+        setDetailError(err instanceof Error ? err.message : "Failed to load deploy");
+      } finally {
+        if (mySeq === detailFetchSeqRef.current) setDetailLoading(false);
+      }
+    },
+    [clearDetailRefetch],
+  );
+
+  // Coalesce a burst of `deployInstance` events into periodic detail fetches
+  // (finding 5). This is a throttle, not a trailing debounce (review finding): a
+  // timer already armed is left alone, so a sustained sub-300ms event stream
+  // still refreshes every ~300ms instead of deferring the fetch until the storm
+  // ends — bounded staleness while the rollout is busiest.
   const scheduleDetailRefetch = useCallback(
     (id: string) => {
-      clearDetailRefetch();
+      if (detailRefetchTimerRef.current) return;
       detailRefetchTimerRef.current = setTimeout(() => {
         detailRefetchTimerRef.current = null;
         void loadDetail(id);
       }, DETAIL_REFETCH_DEBOUNCE_MS);
     },
-    [clearDetailRefetch, loadDetail],
+    [loadDetail],
   );
 
   // Drop any pending debounced refetch when the component unmounts.
@@ -428,7 +442,8 @@ export default function DeploysPage() {
     setSelectedSnapshot(deploy);
     setDetail(null);
     setDetailError(null);
-    loadDetail(deploy.id);
+    setDetailLoading(true);
+    void loadDetail(deploy.id);
   };
 
   const closeDeploy = () => {
@@ -583,12 +598,15 @@ export default function DeploysPage() {
                       <DigestArrow deploy={deploy} />
                     </TableCell>
                     <TableCell>
+                      {/* startedLabel is the single source of the blank-start rule
+                          (review finding: the cell and the drawer must not drift);
+                          the Tooltip wrapper is the only cell-specific part. */}
                       {deploy.startedAt ? (
                         <Tooltip title={new Date(deploy.startedAt).toLocaleString()}>
-                          <span>{formatRelative(deploy.startedAt)}</span>
+                          <span>{startedLabel(deploy.startedAt)}</span>
                         </Tooltip>
                       ) : (
-                        "—"
+                        startedLabel(deploy.startedAt)
                       )}
                     </TableCell>
                     <TableCell>

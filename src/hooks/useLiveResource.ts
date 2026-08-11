@@ -63,6 +63,13 @@ export interface UseLiveResourceOptions<T> {
   };
 }
 
+/**
+ * Trailing-debounce window coalescing refetchOn-triggered fetches: a rollout
+ * emitting one composite event per instance transition must not fire one full
+ * list GET per event (review finding — the burst went from ~30 GETs to ~1).
+ */
+export const REFETCH_DEBOUNCE_MS = 300;
+
 export interface UseLiveResource<T> {
   data: T | null;
   loading: boolean;
@@ -71,8 +78,6 @@ export interface UseLiveResource<T> {
   refresh: () => void;
   /** True only when Connected AND an event proved delivery within the window. */
   live: boolean;
-  /** Time (ms) of the most recent event on this channel, or null. */
-  lastEventAt: number | null;
 }
 
 /**
@@ -146,6 +151,10 @@ export function useLiveResource<T>(
   const runFetch = useCallback(async () => {
     const myId = ++fetchIdRef.current;
     const startSeq = eventSeqRef.current;
+    // Events describe server state that was already committed when they were
+    // published, so a fetch starting NOW will reflect every event seen so far —
+    // any pending "couldn't apply that event" refetch is satisfied by this one.
+    pendingRefetchRef.current = false;
     try {
       const result = await fetcherRef.current();
       if (!activeRef.current) return;
@@ -154,9 +163,12 @@ export function useLiveResource<T>(
       if (myId !== fetchIdRef.current) return;
       // Finding 2: an event mutated state after this fetch started, so its
       // response is stale relative to what the reducer already patched. Discard
-      // it and trigger one immediate follow-up — a fresh fetch beats a stale merge.
+      // it and keep the reducer-patched state — it is already the newest view.
+      // Deliberately NO chained refetch here (review finding): during a sustained
+      // event stream faster than one fetch round-trip, discard-and-refetch chains
+      // back-to-back GETs for the whole burst. The fixed-cadence reconcile poll
+      // settles any residual drift.
       if (eventSeqRef.current !== startSeq) {
-        void runFetch();
         return;
       }
       setData(result);
@@ -171,12 +183,22 @@ export function useLiveResource<T>(
         // Finding 3: an event arrived while data was null and had to be dropped;
         // now that we have a baseline, refetch immediately so it is not lost.
         if (pendingRefetchRef.current) {
-          pendingRefetchRef.current = false;
           void runFetch();
         }
       }
     }
   }, []);
+
+  // Coalesce refetchOn-triggered fetches behind a short trailing debounce: one
+  // composite event per instance transition must not mean one GET per event.
+  const refetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleEventRefetch = useCallback(() => {
+    if (refetchDebounceRef.current) return; // already coalescing a burst
+    refetchDebounceRef.current = setTimeout(() => {
+      refetchDebounceRef.current = null;
+      if (activeRef.current) void runFetch();
+    }, REFETCH_DEBOUNCE_MS);
+  }, [runFetch]);
 
   // Re-evaluate the derived `live` boolean from the current refs and flip state
   // only when it actually changes — the render-cheap heart of finding 4.
@@ -233,13 +255,14 @@ export function useLiveResource<T>(
             eventSeqRef.current += 1;
           }
         }
-        // Some events carry too little to patch a composite row from; refetch.
-        if (opts.refetchOn?.includes(event)) void runFetch();
+        // Some events carry too little to patch a composite row from; refetch —
+        // coalesced, so an event burst fires one GET, not one per event.
+        if (opts.refetchOn?.includes(event)) scheduleEventRefetch();
         // An event on the subscribed channel may itself prove freshness (when it
         // IS the liveness channel); re-evaluate the dot from the hub tap.
         recomputeLive();
       },
-      [recomputeLive, runFetch],
+      [recomputeLive, scheduleEventRefetch],
     ),
   );
 
@@ -253,7 +276,11 @@ export function useLiveResource<T>(
     const unsub = onChannelEvent(livenessChannel, () => {
       if (active) recomputeLive();
     });
-    void joinChannel(livenessChannel).catch(() => {});
+    void joinChannel(livenessChannel).catch((err) => {
+      // Warn, never swallow (review finding): a failed ops:fleet join means the
+      // dot silently reads offline forever with no trace of why.
+      console.warn(`hub: liveness join of '${livenessChannel}' failed`, err);
+    });
     return () => {
       active = false;
       unsub();
@@ -282,9 +309,14 @@ export function useLiveResource<T>(
 
   // Coarse liveness heartbeat: flips the dot to grey shortly after a silent
   // channel's window lapses, without any event to ride on. State only changes
-  // when the boolean actually flips (finding 4).
+  // when the boolean actually flips (finding 4). Skips work while the tab is
+  // hidden (review finding: perpetual background wakeups for an unobservable
+  // verdict); the visibilitychange handler recomputes on return.
   useEffect(() => {
-    const id = setInterval(recomputeLive, LIVENESS_CHECK_MS);
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      recomputeLive();
+    }, LIVENESS_CHECK_MS);
     return () => clearInterval(id);
   }, [recomputeLive]);
 
@@ -301,6 +333,7 @@ export function useLiveResource<T>(
       if (document.hidden) {
         clearPoll();
       } else {
+        recomputeLive();
         void runFetch();
         schedulePoll();
       }
@@ -310,6 +343,10 @@ export function useLiveResource<T>(
     return () => {
       activeRef.current = false;
       clearPoll();
+      if (refetchDebounceRef.current) {
+        clearTimeout(refetchDebounceRef.current);
+        refetchDebounceRef.current = null;
+      }
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [channel, runFetch, schedulePoll, clearPoll, recomputeLive]);
@@ -319,16 +356,15 @@ export function useLiveResource<T>(
     schedulePoll();
   }, [runFetch, schedulePoll]);
 
+  // lastEventAt is deliberately NOT part of the return value (review finding):
+  // no page consumes it, its meaning silently drifted (event channel → liveness
+  // channel), and a render-time getter whose value changes between reads is a
+  // trap. A future consumer should call getLastEventAt(channel) directly.
   return {
     data,
     loading,
     error,
     refresh,
     live: liveState,
-    // Exposed via a getter reading the hub tap so tooltips see the latest
-    // timestamp without the hook re-rendering the page on every event (finding 4).
-    get lastEventAt() {
-      return getLastEventAt(livenessChannel);
-    },
   };
 }

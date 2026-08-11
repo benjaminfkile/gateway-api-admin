@@ -6,6 +6,7 @@ vi.mock("../lib/hubClient");
 
 import { installHubMock, type HubMockControl } from "../test/hubClientMock";
 import {
+  REFETCH_DEBOUNCE_MS,
   useLiveResource,
   type UseLiveResourceOptions,
 } from "./useLiveResource";
@@ -169,18 +170,23 @@ describe("useLiveResource", () => {
     await flush();
     expect(fetcher).toHaveBeenCalledTimes(1);
 
-    // A refetch-triggering event refetches (proof of freshness + reconcile).
+    // A refetch-triggering event refetches after the coalescing window — and a
+    // BURST of them coalesces into ONE fetch (review finding: a rollout emitting
+    // one composite event per instance transition must not GET per event).
     await act(async () => {
       hub.emit("ops:fleet", "instances", { joined: [], pruned: [] });
+      hub.emit("ops:fleet", "instances", { joined: ["i-9"], pruned: [] });
+      hub.emit("ops:fleet", "instances", { joined: [], pruned: ["i-2"] });
     });
-    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1); // nothing until the window elapses
+    await advance(REFETCH_DEBOUNCE_MS);
     expect(fetcher).toHaveBeenCalledTimes(2);
 
     // An event NOT in refetchOn only proves freshness — no refetch.
     await act(async () => {
       hub.emit("ops:fleet", "leaderChange", { instanceId: "i-1" });
     });
-    await flush();
+    await advance(REFETCH_DEBOUNCE_MS);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
@@ -342,9 +348,7 @@ describe("useLiveResource", () => {
       // mount fetch: initial baseline.
       .mockResolvedValueOnce({ status: "in_progress" })
       // second fetch (via refresh): slow, resolves with STALE data later.
-      .mockImplementationOnce(() => new Promise((r) => (resolveSlow = r)))
-      // forced follow-up fetch: fresh, agrees with the event.
-      .mockResolvedValueOnce({ status: "done" });
+      .mockImplementationOnce(() => new Promise((r) => (resolveSlow = r)));
 
     const options: UseLiveResourceOptions<{ status: string }> = {
       channel: "ops:deploys",
@@ -365,14 +369,18 @@ describe("useLiveResource", () => {
     expect(screen.getByTestId("data")).toHaveTextContent('{"status":"done"}');
 
     // The slow fetch resolves with the now-stale "in_progress": it must be
-    // discarded (data stays "done") and a fresh follow-up fetch is triggered.
+    // discarded (data stays "done") WITHOUT chaining an immediate refetch
+    // (review finding: during a sustained event stream faster than fetch RTT,
+    // discard-and-refetch chained back-to-back GETs for the whole burst — the
+    // reducer-patched state is already the newest view and the fixed-cadence
+    // reconcile poll settles any drift).
     await act(async () => {
       resolveSlow({ status: "in_progress" });
     });
     await flush();
 
     expect(screen.getByTestId("data")).toHaveTextContent('{"status":"done"}');
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   // FINDING 3: an event arriving while data is still null (initial fetch in

@@ -102,8 +102,16 @@ let connection: HubConnection | null = null;
 let startPromise: Promise<void> | null = null;
 const stateListeners = new Set<ConnectionStateListener>();
 
-/** Channels the UI has joined; re-joined after every reconnect. */
-const joinedChannels = new Set<string>();
+/**
+ * Channels the UI has joined, REFCOUNTED (review finding): multiple components
+ * legitimately share a channel now that every non-fleet page also joins
+ * "ops:fleet" for liveness (and DeploysPage holds two "ops:deploys"
+ * subscriptions). With a flat Set, whichever subscriber unmounted first sent the
+ * server LeaveChannel and silently severed delivery — and the liveness tap —
+ * for the survivors. The server invoke fires only on the 0→1 join and the 1→0
+ * leave.
+ */
+const joinedChannels = new Map<string, number>();
 
 /**
  * Channels a leaveChannel could not send to the server because the socket was
@@ -200,11 +208,14 @@ async function rejoinChannels(): Promise<void> {
       // Retried on the next reconnect/supervisor tick; keep it pending.
     }
   }
-  for (const channel of joinedChannels) {
+  for (const channel of joinedChannels.keys()) {
     try {
       await conn.invoke("JoinChannel", channel);
-    } catch {
+    } catch (err) {
       // A failed re-join will be retried on the next reconnect/supervisor tick.
+      // Warn rather than swallow (review finding): a silently deaf subscription
+      // is exactly the failure mode this dashboard historically hid.
+      console.warn(`hub: re-join of '${channel}' failed`, err);
     }
   }
 }
@@ -366,29 +377,42 @@ export async function stopConnection(): Promise<void> {
  * during a transition does not throw on a not-yet-open connection.
  */
 export async function joinChannel(channel: string): Promise<void> {
-  joinedChannels.add(channel);
+  const count = (joinedChannels.get(channel) ?? 0) + 1;
+  joinedChannels.set(channel, count);
   pendingLeaves.delete(channel);
+  if (count > 1) {
+    // Another subscriber already holds the server-side group membership (or its
+    // join/rejoin is in flight); refcount only — no second server invoke.
+    return;
+  }
   const conn = await ensureStarted();
   // Re-check the registry after parking on ensureStarted (finding 2): if the
-  // channel was left while we waited for a connection, do not invoke a
+  // channel was fully left while we waited for a connection, do not invoke a
   // JoinChannel the server would keep with no subscriber and no matching leave.
   if (!joinedChannels.has(channel)) return;
   await conn.invoke("JoinChannel", channel);
 }
 
 /**
- * Leave a channel and stop re-joining it. When the socket is not Connected the
- * server invoke cannot be sent, so the channel is recorded as a pending leave
- * that onreconnected/restart flushes — a JoinChannel that lands later must still
- * be undone rather than orphaning a server group (finding 2).
+ * Release one subscriber's hold on a channel; the server LeaveChannel fires only
+ * when the LAST subscriber leaves (refcounted — see joinedChannels). When the
+ * socket is not Connected at that point the invoke cannot be sent, so the
+ * channel is recorded as a pending leave that onreconnected/restart flushes — a
+ * JoinChannel that lands later must still be undone rather than orphaning a
+ * server group (finding 2).
  */
 export async function leaveChannel(channel: string): Promise<void> {
+  const count = joinedChannels.get(channel) ?? 0;
+  if (count > 1) {
+    joinedChannels.set(channel, count - 1);
+    return; // other subscribers remain; keep the server group membership
+  }
   joinedChannels.delete(channel);
   const conn = connection;
   if (conn && conn.state === HubConnectionState.Connected) {
     pendingLeaves.delete(channel);
     await conn.invoke("LeaveChannel", channel);
-  } else {
+  } else if (count > 0) {
     pendingLeaves.add(channel);
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getLastEventAt } from "../lib/hubClient";
 import { useOpsChannel } from "./useOpsChannel";
 
@@ -11,6 +11,14 @@ import { useOpsChannel } from "./useOpsChannel";
  * goes grey and polling drops back to the fast cadence.
  */
 export const LIVENESS_WINDOW_MS = 90_000;
+
+/**
+ * How often the derived `live` boolean is re-evaluated when nothing else forces
+ * it. Coarse on purpose: the "went silent" transition has no event to ride on,
+ * so a low-frequency timer flips the dot to grey shortly after the window lapses
+ * without re-rendering the page on every incoming heartbeat.
+ */
+export const LIVENESS_CHECK_MS = 5_000;
 
 /** Reducer that folds an incoming event's data payload into the current data. */
 export type LiveReducer<T> = (prev: T, data: Record<string, unknown>) => T;
@@ -49,16 +57,21 @@ export interface UseLiveResource<T> {
 /**
  * The reusable "live-with-a-polling-floor" primitive every page builds on.
  *
- * Polling is the floor and never stops: it fetches on mount and then on an
- * interval — `pollMs.reconcile` (slow) while live, `pollMs.fallback` (fast)
- * while not. Incoming events are folded into `data` through the matching reducer
- * and also reset the poll timer, so a stream of events keeps the reconcile poll
- * perpetually deferred.
+ * Polling is the floor and never stops: it fetches on mount and then on a FIXED
+ * cadence — `pollMs.reconcile` (slow) while live, `pollMs.fallback` (fast) while
+ * not. Crucially the poll timer is re-armed only by a completed fetch (and by a
+ * cadence change or tab-visibility), never by an incoming event: a stream of
+ * heartbeats must NOT keep the reconcile poll perpetually deferred, or data with
+ * no matching reducer would freeze at mount-time values under a green dot.
+ * Incoming events only fold their payload into `data` through the matching
+ * reducer (or force a refetch) and select which cadence applies.
  *
  * Liveness is delivery, not connection state: `live` is Connected AND a real
  * event (heartbeats included, tracked in the hub layer) arrived within
  * {@link LIVENESS_WINDOW_MS}. A connection that is up but silent therefore reads
  * NOT live and keeps fast-polling — the honest signal this dashboard was missing.
+ * `lastEventAt` lives in a ref and only the derived boolean is state, so a busy
+ * channel does not re-render the page on every heartbeat.
  *
  * The poll pauses while the tab is hidden (throttled background timers waste
  * requests and fire late) and fetches immediately when it becomes visible again.
@@ -72,12 +85,9 @@ export function useLiveResource<T>(
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [lastEventAt, setLastEventAt] = useState<number | null>(() =>
-    getLastEventAt(channel),
-  );
-  // A bare re-render trigger used to re-evaluate liveness when the window lapses
-  // with no new event (the "went silent" transition has no other signal).
-  const [, tick] = useReducer((n: number) => n + 1, 0);
+  // Only the boolean verdict is state; the raw timestamp is a ref (below) so an
+  // event stream does not force a render per heartbeat.
+  const [liveState, setLiveState] = useState(false);
 
   // Latest options/fetcher without re-subscribing or re-arming timers each render.
   const fetcherRef = useRef(fetcher);
@@ -88,6 +98,23 @@ export function useLiveResource<T>(
   const activeRef = useRef(false);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveRef = useRef(false);
+  const connectedRef = useRef(false);
+  // Raw last-event timestamp; mirrored from the hub tap. Not state (finding 4).
+  const lastEventAtRef = useRef<number | null>(getLastEventAt(channel));
+  // Mirror of `data` readable synchronously inside the event handler, so a
+  // reducer folds onto the latest committed value even between renders.
+  const dataRef = useRef<T | null>(null);
+  // Monotonic fetch id: only the newest fetch may commit (older ones are
+  // superseded). Paired with the event counter below for stale-response guarding.
+  const fetchIdRef = useRef(0);
+  // Bumped whenever an event MUTATES state (a reducer applied). A fetch that
+  // started before such an event carries a snapshot older than what the event
+  // just patched, so its response must be discarded (finding 2).
+  const eventSeqRef = useRef(0);
+  // Set when an event could not be applied because `data` was still null (the
+  // initial fetch was in flight). Forces an immediate refetch once that fetch
+  // settles, so the change is not silently lost under a green dot (finding 3).
+  const pendingRefetchRef = useRef(false);
 
   const clearPoll = useCallback(() => {
     if (pollTimerRef.current) {
@@ -97,82 +124,134 @@ export function useLiveResource<T>(
   }, []);
 
   const runFetch = useCallback(async () => {
+    const myId = ++fetchIdRef.current;
+    const startSeq = eventSeqRef.current;
     try {
       const result = await fetcherRef.current();
       if (!activeRef.current) return;
+      // A newer fetch has since started (e.g. a refetchOn event or refresh); let
+      // it own the result and drop this one silently.
+      if (myId !== fetchIdRef.current) return;
+      // Finding 2: an event mutated state after this fetch started, so its
+      // response is stale relative to what the reducer already patched. Discard
+      // it and trigger one immediate follow-up — a fresh fetch beats a stale merge.
+      if (eventSeqRef.current !== startSeq) {
+        void runFetch();
+        return;
+      }
       setData(result);
+      dataRef.current = result;
       setError(null);
     } catch (err) {
-      if (!activeRef.current) return;
+      if (!activeRef.current || myId !== fetchIdRef.current) return;
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
-      if (activeRef.current) setLoading(false);
+      if (activeRef.current && myId === fetchIdRef.current) {
+        setLoading(false);
+        // Finding 3: an event arrived while data was null and had to be dropped;
+        // now that we have a baseline, refetch immediately so it is not lost.
+        if (pendingRefetchRef.current) {
+          pendingRefetchRef.current = false;
+          void runFetch();
+        }
+      }
+    }
+  }, []);
+
+  // Re-evaluate the derived `live` boolean from the current refs and flip state
+  // only when it actually changes — the render-cheap heart of finding 4.
+  const recomputeLive = useCallback(() => {
+    const next =
+      connectedRef.current &&
+      lastEventAtRef.current !== null &&
+      Date.now() - lastEventAtRef.current < LIVENESS_WINDOW_MS;
+    if (next !== liveRef.current) {
+      liveRef.current = next;
+      setLiveState(next);
     }
   }, []);
 
   // (Re)arm the recurring poll from now, at the cadence liveness currently
-  // dictates. Called on every reset point (mount, each event, liveness flip,
-  // tab-visible) so the interval always reflects the latest state. Paused while
-  // the tab is hidden — no timer is armed until it becomes visible again.
+  // dictates. Called only at legitimate reset points — mount, a cadence change,
+  // tab-visible, refresh, and the completion of each poll fetch — never per
+  // event, so heartbeats cannot defer the reconcile poll (finding 1). Paused
+  // while the tab is hidden: no timer is armed until it becomes visible again.
   const schedulePoll = useCallback(() => {
     clearPoll();
     if (typeof document !== "undefined" && document.hidden) return;
     const { fallback, reconcile } = optionsRef.current.pollMs;
     const interval = liveRef.current ? reconcile : fallback;
     pollTimerRef.current = setTimeout(() => {
-      void runFetch();
-      schedulePoll();
+      pollTimerRef.current = null;
+      // Only a completed fetch re-arms the timer, keeping the cadence fixed.
+      void runFetch().finally(() => {
+        if (activeRef.current) schedulePoll();
+      });
     }, interval);
   }, [clearPoll, runFetch]);
 
-  // Derived liveness, recomputed every render (and forced by `tick` when the
-  // window lapses). Connection state comes from the shared hub subscription.
   const { connected } = useOpsChannel(
     channel,
     useCallback(
       (event: string, eventData: Record<string, unknown>) => {
         const opts = optionsRef.current;
         const reducer = opts.events?.[event];
-        if (reducer) setData((prev) => (prev === null ? prev : reducer(prev, eventData)));
+        if (reducer) {
+          if (dataRef.current === null) {
+            // Can't fold onto a null baseline; force a refetch once one lands.
+            pendingRefetchRef.current = true;
+          } else {
+            const next = reducer(dataRef.current, eventData);
+            dataRef.current = next;
+            setData(next);
+            // Mark that state changed so an in-flight fetch's stale response is
+            // discarded rather than reverting the patch (finding 2).
+            eventSeqRef.current += 1;
+          }
+        }
         // Some events carry too little to patch a composite row from; refetch.
         if (opts.refetchOn?.includes(event)) void runFetch();
         // The hub already stamped lastEventAt for this channel; mirror it into
-        // state so liveness recomputes, and reset the poll (freshness proven).
-        setLastEventAt(getLastEventAt(channel) ?? Date.now());
-        schedulePoll();
+        // the ref and re-evaluate liveness (may flip the dot to green).
+        lastEventAtRef.current = getLastEventAt(channel) ?? Date.now();
+        recomputeLive();
       },
-      [channel, schedulePoll, runFetch],
+      [channel, recomputeLive, runFetch],
     ),
   );
-
-  const live =
-    connected && lastEventAt !== null && Date.now() - lastEventAt < LIVENESS_WINDOW_MS;
 
   // Re-arm the poll whenever the cadence it should run at changes: either
   // liveness flipped (reconcile ⇄ fallback) or the caller tightened/loosened a
   // cadence between renders (e.g. a page whose fallback drops to 5s while a
   // rollout is in flight, then back to 30s once it settles). Reading the value
   // here — not just `live` — keeps an adaptive `pollMs.fallback` honest.
-  const effectiveInterval = live ? options.pollMs.reconcile : options.pollMs.fallback;
+  const effectiveInterval = liveState
+    ? options.pollMs.reconcile
+    : options.pollMs.fallback;
   useEffect(() => {
-    liveRef.current = live;
+    liveRef.current = liveState;
     if (activeRef.current) schedulePoll();
-  }, [effectiveInterval, live, schedulePoll]);
+  }, [effectiveInterval, liveState, schedulePoll]);
 
-  // Arm a one-shot timer at the moment the current window would lapse, so a
-  // channel that goes silent transitions to NOT live on time.
+  // Track connection state in a ref and re-evaluate liveness when it changes.
   useEffect(() => {
-    if (!connected || lastEventAt === null) return;
-    const remaining = lastEventAt + LIVENESS_WINDOW_MS - Date.now();
-    if (remaining <= 0) return;
-    const t = setTimeout(tick, remaining);
-    return () => clearTimeout(t);
-  }, [connected, lastEventAt]);
+    connectedRef.current = connected;
+    recomputeLive();
+  }, [connected, recomputeLive]);
+
+  // Coarse liveness heartbeat: flips the dot to grey shortly after a silent
+  // channel's window lapses, without any event to ride on. State only changes
+  // when the boolean actually flips (finding 4).
+  useEffect(() => {
+    const id = setInterval(recomputeLive, LIVENESS_CHECK_MS);
+    return () => clearInterval(id);
+  }, [recomputeLive]);
 
   // Mount: immediate fetch, then start polling; pause/resume on tab visibility.
   useEffect(() => {
     activeRef.current = true;
-    setLastEventAt(getLastEventAt(channel));
+    lastEventAtRef.current = getLastEventAt(channel);
+    recomputeLive();
     void runFetch().finally(() => {
       if (activeRef.current) schedulePoll();
     });
@@ -193,12 +272,23 @@ export function useLiveResource<T>(
       clearPoll();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [channel, runFetch, schedulePoll, clearPoll]);
+  }, [channel, runFetch, schedulePoll, clearPoll, recomputeLive]);
 
   const refresh = useCallback(() => {
     void runFetch();
     schedulePoll();
   }, [runFetch, schedulePoll]);
 
-  return { data, loading, error, refresh, live, lastEventAt };
+  return {
+    data,
+    loading,
+    error,
+    refresh,
+    live: liveState,
+    // Exposed via a getter reading the ref so tooltips see the latest timestamp
+    // without the hook re-rendering the page on every event (finding 4).
+    get lastEventAt() {
+      return lastEventAtRef.current;
+    },
+  };
 }

@@ -28,6 +28,10 @@ export default defineConfig(({ mode }) => {
       environment: "jsdom",
       setupFiles: "./src/test/setup.ts",
       globals: true,
+      // jsdom + MUI + userEvent tests routinely brush the 5s default when the
+      // whole suite runs in parallel workers; they all pass in isolation.
+      testTimeout: 15_000,
+      hookTimeout: 15_000,
     },
   };
 });

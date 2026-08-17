@@ -169,6 +169,69 @@ function DigestCell({ service }: { service: ServiceSummary }) {
 }
 
 /**
+ * Whether the service has any realtime configuration worth surfacing on the
+ * fleet row. A missing field (undefined/null) means "not set"; presence is a
+ * boolean whose `true` counts as configured.
+ */
+export function hasRealtimeConfig(service: ServiceSummary): boolean {
+  return Boolean(
+    (service.realtimeAllowedOrigins ?? "") ||
+      (service.realtimeAuthPath ?? "") ||
+      (service.realtimeMessagePath ?? "") ||
+      service.realtimePresence,
+  );
+}
+
+/**
+ * Compact indicator + rich tooltip showing a service's stored realtime hub
+ * configuration. Renders nothing when nothing is configured. Matches the
+ * pattern used for the `env` chip so the row stays scannable.
+ */
+function RealtimeChip({ service }: { service: ServiceSummary }) {
+  if (!hasRealtimeConfig(service)) return null;
+  const rows: Array<{ label: string; value: string }> = [];
+  if (service.realtimeAllowedOrigins) {
+    rows.push({ label: "Origins", value: service.realtimeAllowedOrigins });
+  }
+  if (service.realtimeAuthPath) {
+    rows.push({ label: "Auth path", value: service.realtimeAuthPath });
+  }
+  if (service.realtimeMessagePath) {
+    rows.push({ label: "Message path", value: service.realtimeMessagePath });
+  }
+  rows.push({
+    label: "Presence",
+    value: service.realtimePresence ? "on" : "off",
+  });
+  if (service.hasPublishToken !== undefined) {
+    rows.push({
+      label: "Publish token",
+      value: service.hasPublishToken ? "minted" : "not minted",
+    });
+  }
+  const tip = (
+    <Stack spacing={0.25}>
+      {rows.map((r) => (
+        <Typography key={r.label} variant="caption" component="span">
+          <strong>{r.label}:</strong> {r.value}
+        </Typography>
+      ))}
+    </Stack>
+  );
+  return (
+    <Tooltip title={tip}>
+      <Chip
+        label="realtime"
+        size="small"
+        variant="outlined"
+        color="info"
+        aria-label={`realtime configured for ${service.name}`}
+      />
+    </Tooltip>
+  );
+}
+
+/**
  * Warning indicator shown next to the status chip when one or more instances
  * are reporting a reconcile error. Renders nothing when the fleet is clean or
  * when the gateway is too old to report the `errorOn` field.
@@ -454,6 +517,7 @@ export default function ServicesPage() {
                               />
                             </Tooltip>
                           )}
+                          <RealtimeChip service={service} />
                         </Stack>
                       </TableCell>
                       <TableCell>

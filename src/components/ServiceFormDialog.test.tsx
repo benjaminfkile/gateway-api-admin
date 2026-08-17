@@ -247,4 +247,212 @@ describe("ServiceFormDialog", () => {
       );
     });
   });
+
+  describe("realtime section", () => {
+    const withRealtime: ServiceSummary = {
+      ...existingService,
+      realtimeAllowedOrigins: "https://app.example.com",
+      realtimeAuthPath: "/realtime/auth",
+      realtimeMessagePath: "/realtime/send",
+      realtimePresence: true,
+      hasPublishToken: true,
+    };
+
+    it("renders the realtime fields with helpers and links the section header", () => {
+      renderDialog();
+
+      const link = screen.getByRole("link", { name: /realtime hub/i });
+      expect(link).toHaveAttribute("href", expect.stringMatching(/REALTIME\.md/));
+
+      expect(screen.getByLabelText(/allowed origins/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/auth path/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/message path/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole("switch", { name: /broadcast presence events/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/exposes connection ids|exposes connection ids and identities|presence broadcasts connection ids/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/comma-separated exact origins/i),
+      ).toBeInTheDocument();
+    });
+
+    it("prefills the realtime fields from the service", () => {
+      renderDialog(vi.fn(), withRealtime);
+
+      expect(screen.getByLabelText(/allowed origins/i)).toHaveValue(
+        "https://app.example.com",
+      );
+      expect(screen.getByLabelText(/auth path/i)).toHaveValue("/realtime/auth");
+      expect(screen.getByLabelText(/message path/i)).toHaveValue(
+        "/realtime/send",
+      );
+      expect(
+        screen.getByRole("switch", { name: /broadcast presence events/i }),
+      ).toBeChecked();
+    });
+
+    it("shows a read-only publish token indicator when the summary exposes it", () => {
+      renderDialog(vi.fn(), withRealtime);
+      expect(screen.getByText(/publish token minted/i)).toBeInTheDocument();
+    });
+
+    it("omits the publish token chip when the field is absent", () => {
+      renderDialog(vi.fn(), existingService);
+      expect(screen.queryByText(/publish token/i)).toBeNull();
+    });
+
+    it("blocks save with a clear message when an origin is malformed", async () => {
+      const user = userEvent.setup();
+      renderDialog(vi.fn(), existingService);
+
+      const origins = screen.getByLabelText(/allowed origins/i);
+      await user.type(
+        origins,
+        "https://ok.example.com, https://bad.example.com/path",
+      );
+
+      await user.click(screen.getByRole("button", { name: /save/i }));
+      expect(
+        screen.getByText(
+          /"https:\/\/bad\.example\.com\/path" is not a valid origin/i,
+        ),
+      ).toBeInTheDocument();
+      expect(mock.history.put).toHaveLength(0);
+    });
+
+    it("blocks save with a clear message when a wildcard origin is entered", async () => {
+      const user = userEvent.setup();
+      renderDialog(vi.fn(), existingService);
+
+      await user.type(
+        screen.getByLabelText(/allowed origins/i),
+        "https://*.example.com",
+      );
+
+      await user.click(screen.getByRole("button", { name: /save/i }));
+      expect(
+        screen.getByText(/is not a valid origin/i),
+      ).toBeInTheDocument();
+      expect(mock.history.put).toHaveLength(0);
+    });
+
+    it("blocks save when the auth path is not rooted", async () => {
+      const user = userEvent.setup();
+      renderDialog(vi.fn(), existingService);
+
+      await user.type(screen.getByLabelText(/auth path/i), "realtime/auth");
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      expect(
+        screen.getByText(/auth path must be rooted/i),
+      ).toBeInTheDocument();
+      expect(mock.history.put).toHaveLength(0);
+    });
+
+    it("blocks save when the message path is not rooted", async () => {
+      const user = userEvent.setup();
+      renderDialog(vi.fn(), existingService);
+
+      await user.type(screen.getByLabelText(/message path/i), "send");
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      expect(
+        screen.getByText(/message path must be rooted/i),
+      ).toBeInTheDocument();
+      expect(mock.history.put).toHaveLength(0);
+    });
+
+    it("sends touched realtime fields on save", async () => {
+      const user = userEvent.setup();
+      mock.onPut("/mgmt/services/web").reply(200, {});
+      renderDialog(vi.fn(), existingService);
+
+      await user.type(
+        screen.getByLabelText(/allowed origins/i),
+        "https://app.example.com, https://admin.example.com:8443",
+      );
+      await user.type(screen.getByLabelText(/auth path/i), "/realtime/auth");
+      await user.type(
+        screen.getByLabelText(/message path/i),
+        "/realtime/send",
+      );
+      await user.click(
+        screen.getByRole("switch", { name: /broadcast presence events/i }),
+      );
+
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(mock.history.put).toHaveLength(1));
+      expect(JSON.parse(mock.history.put[0].data)).toMatchObject({
+        realtimeAllowedOrigins:
+          "https://app.example.com,https://admin.example.com:8443",
+        realtimeAuthPath: "/realtime/auth",
+        realtimeMessagePath: "/realtime/send",
+        realtimePresence: true,
+      });
+    });
+
+    it("does NOT send realtime fields the user did not touch (tri-state omission)", async () => {
+      // The gateway upsert is tri-state on the realtime fields: omitting
+      // preserves, "" clears, non-empty sets. If a form saved with prefilled
+      // values sent every field, editing image or tag would silently overwrite
+      // stored values the user never changed. The editor must therefore omit
+      // untouched realtime fields entirely.
+      const user = userEvent.setup();
+      mock.onPut("/mgmt/services/web").reply(200, {});
+      renderDialog(vi.fn(), withRealtime);
+
+      // Edit an unrelated field only.
+      const tag = screen.getByLabelText(/tag/i);
+      await user.clear(tag);
+      await user.type(tag, "v2");
+
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(mock.history.put).toHaveLength(1));
+      const body = JSON.parse(mock.history.put[0].data);
+      expect(body).not.toHaveProperty("realtimeAllowedOrigins");
+      expect(body).not.toHaveProperty("realtimeAuthPath");
+      expect(body).not.toHaveProperty("realtimeMessagePath");
+      expect(body).not.toHaveProperty("realtimePresence");
+      expect(body.tag).toBe("v2");
+    });
+
+    it("sends an explicit empty string when a realtime field is cleared (tri-state clear)", async () => {
+      const user = userEvent.setup();
+      mock.onPut("/mgmt/services/web").reply(200, {});
+      renderDialog(vi.fn(), withRealtime);
+
+      await user.clear(screen.getByLabelText(/allowed origins/i));
+      await user.clear(screen.getByLabelText(/auth path/i));
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(mock.history.put).toHaveLength(1));
+      const body = JSON.parse(mock.history.put[0].data);
+      expect(body).toHaveProperty("realtimeAllowedOrigins", "");
+      expect(body).toHaveProperty("realtimeAuthPath", "");
+      // Untouched fields remain omitted even when others were cleared.
+      expect(body).not.toHaveProperty("realtimeMessagePath");
+      expect(body).not.toHaveProperty("realtimePresence");
+    });
+
+    it("sends realtimePresence: false when the presence toggle is turned off", async () => {
+      const user = userEvent.setup();
+      mock.onPut("/mgmt/services/web").reply(200, {});
+      renderDialog(vi.fn(), withRealtime);
+
+      await user.click(
+        screen.getByRole("switch", { name: /broadcast presence events/i }),
+      );
+      await user.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(mock.history.put).toHaveLength(1));
+      expect(JSON.parse(mock.history.put[0].data)).toHaveProperty(
+        "realtimePresence",
+        false,
+      );
+    });
+  });
 });

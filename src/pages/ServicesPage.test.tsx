@@ -139,6 +139,40 @@ describe("ServicesPage", () => {
     expect(within(rowFor("worker")).getByText("→ host —")).toBeInTheDocument();
   });
 
+  it("surfaces stored realtime configuration in a per-row chip with details in its tooltip", async () => {
+    const user = userEvent.setup();
+    const REALTIME = svc({
+      name: "chat",
+      realtimeAllowedOrigins: "https://app.example.com",
+      realtimeAuthPath: "/realtime/auth",
+      realtimeMessagePath: "/realtime/send",
+      realtimePresence: true,
+      hasPublishToken: true,
+    });
+    mock.onGet("/mgmt/services").reply(200, [RUNNING, REALTIME]);
+    renderPage();
+
+    await screen.findByText("chat");
+    // Configured service exposes the chip; a service with no realtime config does not.
+    expect(
+      within(rowFor("chat")).getByLabelText(/realtime configured for chat/i),
+    ).toBeInTheDocument();
+    expect(
+      within(rowFor("web")).queryByLabelText(/realtime configured/i),
+    ).toBeNull();
+
+    await user.hover(
+      within(rowFor("chat")).getByLabelText(/realtime configured for chat/i),
+    );
+    expect(
+      await screen.findByText("https://app.example.com"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("/realtime/auth")).toBeInTheDocument();
+    expect(screen.getByText("/realtime/send")).toBeInTheDocument();
+    // Publish token status renders too when the field is present.
+    expect(screen.getByText(/minted/i)).toBeInTheDocument();
+  });
+
   it("shows a reconcile-error indicator only when errorOn > 0", async () => {
     mock.onGet("/mgmt/services").reply(200, [RUNNING, ERRORED]);
     renderPage();

@@ -37,6 +37,21 @@ export interface ServiceSummary {
    * This is only the reference — never the secret values.
    */
   envSecretRef?: string | null;
+  /**
+   * Per-service realtime hub configuration (see gateway REALTIME.md). All four
+   * fields are optional/nullable; a missing/null value on the summary means the
+   * feature is off. The gateway's upsert is tri-state on these fields — omit to
+   * preserve, empty string to clear, non-empty to set.
+   */
+  realtimeAllowedOrigins?: string | null;
+  realtimeAuthPath?: string | null;
+  realtimeMessagePath?: string | null;
+  realtimePresence?: boolean;
+  /**
+   * Whether the gateway has minted a publish token for this service. Read-only
+   * indicator shown in the editor; absent on gateways that don't surface it.
+   */
+  hasPublishToken?: boolean;
   updatedBy: string;
   updatedAt: string;
   fleet: ServiceRollup;
@@ -113,4 +128,13 @@ export interface ServiceUpsert {
    * leave an existing ref untouched; only the reference is sent, never values.
    */
   envSecretRef?: string | null;
+  /**
+   * Realtime hub configuration (see gateway REALTIME.md). All four fields are
+   * tri-state on upsert: omit to preserve the stored value, empty string to
+   * clear, non-empty to set. Presence is a boolean — omit to preserve.
+   */
+  realtimeAllowedOrigins?: string | null;
+  realtimeAuthPath?: string | null;
+  realtimeMessagePath?: string | null;
+  realtimePresence?: boolean;
 }

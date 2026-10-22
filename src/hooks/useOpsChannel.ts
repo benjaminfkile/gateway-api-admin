@@ -22,7 +22,7 @@ export interface OpsChannel {
  * connection, joins the channel on mount, and leaves + unsubscribes on unmount.
  * `onEvent` fires for every event on the channel with the event name and its
  * data payload; the latest callback is used without re-subscribing. The hub is
- * purely additive — callers keep polling as a fallback and use `connected` to
+ * purely additive - callers keep polling as a fallback and use `connected` to
  * show that live updates are flowing.
  */
 export function useOpsChannel(channel: string, onEvent: ChannelHandler): OpsChannel {
@@ -47,7 +47,7 @@ export function useOpsChannel(channel: string, onEvent: ChannelHandler): OpsChan
         return joinChannel(channel);
       })
       .catch((err) => {
-        // Hub unavailable — polling remains the fallback. Surface it in the
+        // Hub unavailable - polling remains the fallback. Surface it in the
         // console instead of swallowing so a stuck subscription is diagnosable.
         console.warn(`useOpsChannel: could not start/join "${channel}"`, err);
       });
@@ -86,4 +86,13 @@ export function useDeployProgress(
   return useOpsChannel("ops:deploys", (event, data) => {
     if (deployId !== null && data.deployId === deployId) onEvent(event, data);
   });
+}
+
+/**
+ * Live job updates on the "ops:jobs" channel: "job" events when a definition is
+ * upserted, deleted, enabled or disabled, and "run" events on every run status
+ * change.
+ */
+export function useJobsChannel(onEvent: ChannelHandler): OpsChannel {
+  return useOpsChannel("ops:jobs", onEvent);
 }

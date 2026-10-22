@@ -6,7 +6,12 @@ import * as hubClient from "../lib/hubClient";
 vi.mock("../lib/hubClient");
 
 import { installHubMock, type HubMockControl } from "../test/hubClientMock";
-import { useDeployProgress, useFleetStatus, useOpsChannel } from "./useOpsChannel";
+import {
+  useDeployProgress,
+  useFleetStatus,
+  useJobsChannel,
+  useOpsChannel,
+} from "./useOpsChannel";
 import type { ChannelHandler } from "../lib/hubClient";
 
 let hub: HubMockControl;
@@ -113,5 +118,26 @@ describe("useFleetStatus", () => {
     await waitFor(() =>
       expect(hubClient.joinChannel).toHaveBeenCalledWith("ops:fleet"),
     );
+  });
+});
+
+function JobsProbe({ onEvent }: { onEvent: ChannelHandler }) {
+  useJobsChannel(onEvent);
+  return null;
+}
+
+describe("useJobsChannel", () => {
+  it("joins ops:jobs and delivers its job and run events", async () => {
+    const onEvent = vi.fn();
+    render(<JobsProbe onEvent={onEvent} />);
+    await waitFor(() =>
+      expect(hubClient.joinChannel).toHaveBeenCalledWith("ops:jobs"),
+    );
+
+    act(() => hub.emit("ops:jobs", "run", { runId: 7, job: "nightly" }));
+    act(() => hub.emit("ops:deploys", "deploy", { deployId: "d-1" }));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith("run", { runId: 7, job: "nightly" });
   });
 });

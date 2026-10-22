@@ -12,7 +12,7 @@ vi.mock("./lib/cognitoClient", () => ({
   signOut: vi.fn(),
 }));
 
-// The SignalR hub is mocked wholesale — no real connection is made in tests.
+// The SignalR hub is mocked wholesale - no real connection is made in tests.
 import * as hubClient from "./lib/hubClient";
 vi.mock("./lib/hubClient");
 
@@ -46,6 +46,7 @@ beforeEach(() => {
   // heading renders regardless of which page we're on.
   mock.onGet("/mgmt/services").reply(200, []);
   mock.onGet("/mgmt/deploys").reply(200, []);
+  mock.onGet("/mgmt/jobs").reply(200, []);
   mock.onGet("/mgmt/instances").reply(200, []);
   mock.onGet(/\/mgmt\/services\/.+\/logs/).reply(200, []);
 });
@@ -74,6 +75,7 @@ function renderApp() {
 const NAV = [
   { label: "Services", heading: "Services" },
   { label: "Deploys", heading: "Deploys" },
+  { label: "Jobs", heading: "Jobs" },
   { label: "Instances", heading: "Instances" },
   { label: "Logs", heading: "Logs" },
   { label: "Node stats", heading: "Node stats" },

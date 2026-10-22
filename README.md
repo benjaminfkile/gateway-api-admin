@@ -1,9 +1,9 @@
 # gateway-api-admin
 
-Ops dashboard for [gateway-api](https://github.com/benjaminfkile/gateway-api) —
+Ops dashboard for [gateway-api](https://github.com/benjaminfkile/gateway-api) -
 manage the service fleet from a browser: start/stop/restart services, roll and
-roll back deploys, watch per-instance convergence live, and view logs. See the
-gateway's `docs/tech-spec.md` §4.6 for the design.
+roll back deploys, watch per-instance convergence live, run scheduled jobs,
+and view logs. See the gateway's `docs/tech-spec.md` §4.6 for the design.
 
 Auth is Cognito with required TOTP MFA; all calls hit the gateway's `/mgmt/*`
 endpoints with a bearer token.
@@ -62,46 +62,55 @@ heading renders, plus checks the in-shell 404 fallback.
 
 ## Features by page
 
-- **Services** (`/`) — fleet grid of every registered service with rolled-up
+- **Services** (`/`) - fleet grid of every registered service with rolled-up
   running/total counts, status chips, digest (with drift warnings), and a
   per-row action menu: start / stop (force-stop confirmation for
   health-critical services) / restart, deploy, rollback, and add-service. Live
   fleet events refresh the grid; a 30s poll is the fallback.
-- **Deploys** (`/deploys`) — deploy history filterable by service and status.
+- **Deploys** (`/deploys`) - deploy history filterable by service and status.
   Selecting a row opens a detail drawer with a live convergence bar and
   per-instance progress that updates from `ops:deploys` hub events (fast poll
   while a rollout is in flight, slow when idle).
-- **Instances** (`/instances`) — per-instance view of the fleet: gateway
+- **Jobs** (`/jobs`) - scheduled jobs: a script run on a cron schedule (or on
+  demand) as a short-lived container. The table shows the schedule and zone (or
+  "manual only"), the next run, the last run's status, age and duration, and an
+  enabled switch. Run now and Delete confirm first (Delete offers force while a
+  run is active). The editor covers schedule, time zone, image and tag, secret
+  ref, timeout and a monospace script editor with its version history. The runs
+  drawer lists runs with Load more, cancels active runs and opens each run's log
+  in the terminal panel, polling while the run is active. `ops:jobs` hub events
+  keep the list current; polling is the fallback.
+- **Instances** (`/instances`) - per-instance view of the fleet: gateway
   version, leader, heartbeat freshness (stale flagging), and the services each
   instance is running.
-- **Logs** (`/logs`) — xterm-based log viewer. Pick a service, instance, and
+- **Logs** (`/logs`) - xterm-based log viewer. Pick a service, instance, and
   tail length; follow-mode polls and appends only new lines. Re-colours with the
   light/dark theme.
-- **Node stats** (`/stats`) — fleet summary cards (instance count, stale count,
+- **Node stats** (`/stats`) - fleet summary cards (instance count, stale count,
   gateway-version spread with a mixed-version warning) over a grid of instance
   cards.
 
 ## Hardening
 
-- **Auth gate** — `RequireAuth` blocks the authed shell until Cognito reports a
+- **Auth gate** - `RequireAuth` blocks the authed shell until Cognito reports a
   valid session and redirects to `/login`, preserving the intended location in
   router state so the user returns after signing in.
-- **Session expiry** — the axios response interceptor signs out on any `401`,
+- **Session expiry** - the axios response interceptor signs out on any `401`,
   which flips auth state to signed-out and lets `RequireAuth` bounce the user to
   `/login` (again preserving where they were). It also normalizes network
   failures into a single readable message for the pages.
-- **Live hub cleanup** — signing out stops the shared SignalR connection so it
+- **Live hub cleanup** - signing out stops the shared SignalR connection so it
   doesn't keep reconnecting with a stale token.
-- **Error boundary** — an `ErrorBoundary` wraps the shell and shows a recoverable
+- **Error boundary** - an `ErrorBoundary` wraps the shell and shows a recoverable
   reload card instead of a blank screen if a render throws.
-- **404** — unmatched paths inside the shell render a Not Found page.
+- **404** - unmatched paths inside the shell render a Not Found page.
 
 ## Layout
 
-- `src/api` — axios client + per-resource API modules
-- `src/components` — AppShell (drawer nav), ErrorBoundary, shared widgets
-- `src/contexts` — auth (sign-in → TOTP challenge → session), snackbar
-- `src/hooks` — SignalR-backed live-data hooks
-- `src/pages` — Services, Deploys, Instances, Logs, Node stats, Not Found
-- `src/theme` — MUI theme, light/dark mode
-- `src/lib` — Cognito client, SignalR hub client, xterm terminal wrapper
+- `src/api` - axios client + per-resource API modules
+- `src/components` - AppShell (drawer nav), ErrorBoundary, shared widgets
+- `src/contexts` - auth (sign-in → TOTP challenge → session), snackbar
+- `src/hooks` - SignalR-backed live-data hooks
+- `src/pages` - Services, Deploys, Jobs, Instances, Logs, Node stats, Not Found
+- `src/theme` - MUI theme, light/dark mode
+- `src/lib` - Cognito client, SignalR hub client, xterm terminal wrapper

@@ -15,6 +15,7 @@ import {
 import MenuIcon from "@mui/icons-material/Menu";
 import AppsIcon from "@mui/icons-material/Apps";
 import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
+import ScheduleIcon from "@mui/icons-material/Schedule";
 import DnsIcon from "@mui/icons-material/Dns";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
@@ -27,6 +28,7 @@ const DRAWER_WIDTH = 220;
 const NAV_ITEMS = [
   { label: "Services", path: "/", icon: <AppsIcon /> },
   { label: "Deploys", path: "/deploys", icon: <RocketLaunchIcon /> },
+  { label: "Jobs", path: "/jobs", icon: <ScheduleIcon /> },
   { label: "Instances", path: "/instances", icon: <DnsIcon /> },
   { label: "Logs", path: "/logs", icon: <TerminalIcon /> },
   { label: "Node stats", path: "/stats", icon: <MonitorHeartIcon /> },

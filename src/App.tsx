@@ -5,6 +5,7 @@ import RequireAuth from "./components/RequireAuth";
 import LoginPage from "./pages/LoginPage";
 import ServicesPage from "./pages/ServicesPage";
 import DeploysPage from "./pages/DeploysPage";
+import JobsPage from "./pages/JobsPage";
 import InstancesPage from "./pages/InstancesPage";
 import LogsPage from "./pages/LogsPage";
 import NodeStatsPage from "./pages/NodeStatsPage";
@@ -25,6 +26,7 @@ export default function App() {
       >
         <Route path="/" element={<ServicesPage />} />
         <Route path="/deploys" element={<DeploysPage />} />
+        <Route path="/jobs" element={<JobsPage />} />
         <Route path="/instances" element={<InstancesPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/stats" element={<NodeStatsPage />} />

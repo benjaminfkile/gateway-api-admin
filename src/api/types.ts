@@ -223,3 +223,261 @@ export interface ScriptVersionBody {
   version: number;
   script: string;
 }
+
+/** Lifecycle of a load run. The first six are non-terminal. */
+export type LoadRunStatus =
+  | "queued"
+  | "fleet_up"
+  | "generators_up"
+  | "ramping"
+  | "holding"
+  | "draining"
+  | "succeeded"
+  | "stopped"
+  | "expired"
+  | "failed"
+  | "lost";
+
+/** A k6 scenario as listed by `GET /mgmt/load/scenarios`. The script body is never included. */
+export interface LoadScenario {
+  name: string;
+  /** GitHub repository as `owner/name`. */
+  repository: string;
+  commitSha: string | null;
+  scriptVersion: number;
+  image: string;
+  tag: string;
+  paramsDefault: Record<string, string>;
+  maxVusPerGenerator: number;
+  lastValidationRunId: number | null;
+  validated: boolean;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+/** A scenario with its current script, as returned by `GET /mgmt/load/scenarios/{name}`. */
+export interface LoadScenarioDetail extends LoadScenario {
+  script: string;
+}
+
+/**
+ * Payload accepted by `PUT /mgmt/load/scenarios/{name}`. An absent field keeps
+ * the stored value; create needs repository, script and maxVusPerGenerator.
+ */
+export interface LoadScenarioUpsert {
+  repository?: string;
+  commitSha?: string;
+  script?: string;
+  image?: string;
+  tag?: string;
+  paramsDefault?: Record<string, string>;
+  maxVusPerGenerator?: number;
+}
+
+export type PreflightStatus = "green" | "amber" | "red";
+
+export interface PreflightCheck {
+  name: string;
+  status: PreflightStatus;
+  message: string;
+  fix: string | null;
+}
+
+export interface PreflightResult {
+  ok?: boolean;
+  checks: PreflightCheck[];
+}
+
+export interface PreflightQuery {
+  scenario: string;
+  target: string;
+  confirm: string;
+  generators: number;
+  vus: number;
+  fleet?: number | null;
+  validation: boolean;
+}
+
+/** Body of `POST /mgmt/load/runs`. */
+export interface LoadRunStart {
+  scenario: string;
+  target: string;
+  confirm: string;
+  generators: number;
+  vusPerGenerator: number;
+  rampSeconds: number;
+  holdSeconds: number;
+  params?: Record<string, string>;
+  fleetSize?: number | null;
+  restoreFleet: boolean;
+  validation: boolean;
+}
+
+/** One load run as listed by `GET /mgmt/load/runs`, without timeline or stats. */
+export interface LoadRun {
+  id: number;
+  scenario: string;
+  scenarioVersion: number;
+  target: string;
+  validation: boolean;
+  actor: string;
+  status: LoadRunStatus;
+  generators: number;
+  vusPerGenerator: number;
+  rampSeconds: number;
+  holdSeconds: number;
+  fleetSizeRequested: number | null;
+  fleetSizeBefore: number | null;
+  restoreFleet: boolean;
+  hardStopAt: string | null;
+  checkedIn: number;
+  queuedAt: string;
+  startedAt: string | null;
+  rampStartedAt: string | null;
+  finishedAt: string | null;
+  stopRequestedAt: string | null;
+  stopReason: string | null;
+  verdict: string | null;
+  detail: string | null;
+  /** The maximum of every numeric stats leaf, keyed `metric.field`. */
+  peaks: Record<string, number> | null;
+}
+
+export interface LoadRunTimelineEntry {
+  at: string;
+  status: string;
+  by: string | null;
+  note: string | null;
+}
+
+/** One run with its timeline, as returned by `GET /mgmt/load/runs/{id}`. */
+export interface LoadRunDetail extends LoadRun {
+  timeline: LoadRunTimelineEntry[];
+}
+
+/** One k6 metric in a generator stats line: its type plus numeric fields such as `count` or `p(95)`. */
+export type LoadMetric = { type: string } & Record<string, number | string>;
+
+/** A generator stats line, and the shape of the fleet-wide aggregate. */
+export interface GeneratorStatsBody {
+  runId?: number;
+  index?: number;
+  at: string;
+  vus: number;
+  metrics: Record<string, LoadMetric>;
+}
+
+export interface FleetInstanceSample {
+  instanceId: string;
+  leader: boolean;
+  cpu: number | null;
+  memory: number | null;
+  disk: number | null;
+  hubConnections: number | null;
+}
+
+/** A fleet sample written by the leader while a run is active. */
+export interface FleetStatsBody {
+  at: string;
+  instances: FleetInstanceSample[];
+  channelMembers: number | null;
+}
+
+export type LoadStatSource = "generator" | "fleet";
+
+export interface LoadStatRow {
+  id: number;
+  source: LoadStatSource;
+  index: number | null;
+  at: string;
+  body: GeneratorStatsBody | FleetStatsBody;
+}
+
+export interface LoadStatsQuery {
+  from?: string;
+  to?: string;
+  source?: LoadStatSource;
+  index?: number;
+  /** Bucket width in seconds; one row per bucket with the maximum of each leaf. */
+  step?: number;
+}
+
+export interface FleetResource {
+  group: string;
+  min: number;
+  desired: number;
+  max: number;
+  inService: number;
+  instanceClass: string | null;
+  templateVersion: string | number | null;
+  refreshInProgress: boolean;
+  /** Allowed fleet instance types. */
+  classes?: string[];
+  maxSize?: number;
+  error?: string | null;
+}
+
+export interface GeneratorsResource {
+  group: string;
+  desired: number;
+  inService: number;
+  max: number;
+  error?: string | null;
+}
+
+export interface CacheResource {
+  id: string;
+  nodeType: string | null;
+  status: string | null;
+  /** Allowed cache node types. */
+  nodeTypes?: string[];
+  error?: string | null;
+}
+
+export interface DatabaseResource {
+  id: string;
+  instanceClass: string | null;
+  status: string | null;
+  maxConnections: number | null;
+  connectionsInUse: number | null;
+  documentedMaxConnections?: number | null;
+  /** Allowed database classes. */
+  classes?: string[];
+  error?: string | null;
+}
+
+/** `GET /mgmt/resources`. A block is null when its configuration key is unset. */
+export interface ResourcesState {
+  runActive?: boolean;
+  fleet: FleetResource | null;
+  generators: GeneratorsResource | null;
+  cache: CacheResource | null;
+  database: DatabaseResource | null;
+  /** Older shape of the allow lists; the per-block lists win when present. */
+  allowed?: {
+    fleetClasses?: string[];
+    cacheNodeTypes?: string[];
+    databaseClasses?: string[];
+  };
+}
+
+/** The fleet group's newest instance refresh. */
+export interface FleetRefresh {
+  group?: string;
+  refreshId?: string;
+  id?: string;
+  status: string;
+  percentComplete: number | null;
+  inProgress?: boolean;
+}
+
+export interface ResourceAuditEntry {
+  id?: number;
+  at: string;
+  actor: string;
+  resource: string;
+  action: string;
+  before: string | null;
+  after: string | null;
+  detail: string | null;
+}

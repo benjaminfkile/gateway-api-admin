@@ -19,8 +19,11 @@ import ScheduleIcon from "@mui/icons-material/Schedule";
 import DnsIcon from "@mui/icons-material/Dns";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
+import SpeedIcon from "@mui/icons-material/Speed";
+import TuneIcon from "@mui/icons-material/Tune";
 import LogoutIcon from "@mui/icons-material/Logout";
 import ThemeToggle from "./ThemeToggle";
+import LoadBanner from "./LoadBanner";
 import { useAuth } from "../contexts/AuthContext";
 
 const DRAWER_WIDTH = 220;
@@ -29,9 +32,11 @@ const NAV_ITEMS = [
   { label: "Services", path: "/", icon: <AppsIcon /> },
   { label: "Deploys", path: "/deploys", icon: <RocketLaunchIcon /> },
   { label: "Jobs", path: "/jobs", icon: <ScheduleIcon /> },
+  { label: "Load", path: "/load", icon: <SpeedIcon /> },
   { label: "Instances", path: "/instances", icon: <DnsIcon /> },
   { label: "Logs", path: "/logs", icon: <TerminalIcon /> },
   { label: "Node stats", path: "/stats", icon: <MonitorHeartIcon /> },
+  { label: "Resources", path: "/resources", icon: <TuneIcon /> },
 ];
 
 export default function AppShell() {
@@ -45,7 +50,10 @@ export default function AppShell() {
       {NAV_ITEMS.map((item) => (
         <ListItemButton
           key={item.path}
-          selected={location.pathname === item.path}
+          selected={
+            location.pathname === item.path ||
+            (item.path !== "/" && location.pathname.startsWith(`${item.path}/`))
+          }
           onClick={() => {
             navigate(item.path);
             setMobileOpen(false);
@@ -109,6 +117,7 @@ export default function AppShell() {
 
       <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
         <Toolbar />
+        <LoadBanner />
         <Outlet />
       </Box>
     </Box>

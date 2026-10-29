@@ -10,7 +10,9 @@ import {
   useDeployProgress,
   useFleetStatus,
   useJobsChannel,
+  useLoadChannel,
   useOpsChannel,
+  useResourcesChannel,
 } from "./useOpsChannel";
 import type { ChannelHandler } from "../lib/hubClient";
 
@@ -139,5 +141,40 @@ describe("useJobsChannel", () => {
 
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledWith("run", { runId: 7, job: "nightly" });
+  });
+});
+
+function LoadProbe({ onEvent }: { onEvent: ChannelHandler }) {
+  useLoadChannel(onEvent);
+  return null;
+}
+
+function ResourcesProbe({ onEvent }: { onEvent: ChannelHandler }) {
+  useResourcesChannel(onEvent);
+  return null;
+}
+
+describe("useLoadChannel and useResourcesChannel", () => {
+  it("joins ops:load and delivers only its events", async () => {
+    const onEvent = vi.fn();
+    render(<LoadProbe onEvent={onEvent} />);
+    await waitFor(() => expect(hubClient.joinChannel).toHaveBeenCalledWith("ops:load"));
+
+    act(() => hub.emit("ops:load", "run", { runId: 3, status: "ramping" }));
+    act(() => hub.emit("ops:jobs", "run", { runId: 7 }));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith("run", { runId: 3, status: "ramping" });
+  });
+
+  it("joins ops:resources and delivers its refresh events", async () => {
+    const onEvent = vi.fn();
+    render(<ResourcesProbe onEvent={onEvent} />);
+    await waitFor(() =>
+      expect(hubClient.joinChannel).toHaveBeenCalledWith("ops:resources"),
+    );
+
+    act(() => hub.emit("ops:resources", "refresh", { status: "InProgress" }));
+    expect(onEvent).toHaveBeenCalledWith("refresh", { status: "InProgress" });
   });
 });

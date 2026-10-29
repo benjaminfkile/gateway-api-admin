@@ -96,3 +96,21 @@ export function useDeployProgress(
 export function useJobsChannel(onEvent: ChannelHandler): OpsChannel {
   return useOpsChannel("ops:jobs", onEvent);
 }
+
+/**
+ * Live load updates on the "ops:load" channel: "scenario" events on upsert and
+ * delete, "run" events on start, stop request and every status change, "stats"
+ * with the fleet-wide aggregate after every generator line and "fleet" after
+ * every fleet sample.
+ */
+export function useLoadChannel(onEvent: ChannelHandler): OpsChannel {
+  return useOpsChannel("ops:load", onEvent);
+}
+
+/**
+ * Live resource updates on the "ops:resources" channel: "change" after every
+ * audited change and "refresh" with instance refresh progress.
+ */
+export function useResourcesChannel(onEvent: ChannelHandler): OpsChannel {
+  return useOpsChannel("ops:resources", onEvent);
+}

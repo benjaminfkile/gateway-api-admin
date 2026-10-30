@@ -74,9 +74,14 @@ export interface MetricTile {
   value: number;
 }
 
+/** Byte counters that get their own tiles instead of a plain count tile. The
+ * k6 data_received and data_sent counters are replaced by the scenario's own. */
+const BYTE_COUNTERS = new Set(["bytes_received", "bytes_sent", "data_received", "data_sent"]);
+
 /**
  * One tile for total users, then one for every counter's `count` and every
- * trend's `p(95)` in the aggregate, in the order the metrics arrived.
+ * trend's `p(95)` in the aggregate, in the order the metrics arrived. The byte
+ * counters are left to {@link byteTiles}.
  */
 export function metricTiles(aggregate: GeneratorStatsBody | null): MetricTile[] {
   if (!aggregate) return [];
@@ -86,11 +91,53 @@ export function metricTiles(aggregate: GeneratorStatsBody | null): MetricTile[] 
   for (const [name, metric] of Object.entries(aggregate.metrics ?? {})) {
     if (metric.type === "trend" && typeof metric["p(95)"] === "number") {
       tiles.push({ key: `${name}.p(95)`, label: `${name} p(95)`, value: metric["p(95)"] });
-    } else if (metric.type === "counter" && typeof metric.count === "number") {
+    } else if (metric.type === "counter" && typeof metric.count === "number" && !BYTE_COUNTERS.has(name)) {
       tiles.push({ key: `${name}.count`, label: `${name} count`, value: metric.count });
     }
   }
   return tiles;
+}
+
+/** A byte count as KB, MB or GB with one decimal. */
+export function formatBytes(bytes: number): string {
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** A byte rate per second as KB/s with one decimal. */
+export function formatByteRate(bytesPerSecond: number): string {
+  return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+}
+
+export interface ByteTile {
+  key: string;
+  label: string;
+  /** The count as KB, MB or GB, or a dash when the counter is absent. */
+  value: string;
+  /** The rate as KB/s, or null when the counter or its rate is absent. */
+  rate: string | null;
+}
+
+/**
+ * The Bytes in and Bytes out tiles from the scenario's bytes_received and
+ * bytes_sent counters (scenario version 3 on). A run without them shows a dash.
+ */
+export function byteTiles(aggregate: GeneratorStatsBody | null): ByteTile[] {
+  const tile = (name: string, label: string): ByteTile => {
+    const metric = aggregate?.metrics?.[name];
+    const count = metric?.count;
+    const rate = metric?.rate;
+    return {
+      key: name,
+      label,
+      value: typeof count === "number" ? formatBytes(count) : "-",
+      rate: typeof count === "number" && typeof rate === "number" ? formatByteRate(rate) : null,
+    };
+  };
+  return [tile("bytes_received", "Bytes in"), tile("bytes_sent", "Bytes out")];
 }
 
 /** Name of the first trend metric that carries a p(95), or null. */

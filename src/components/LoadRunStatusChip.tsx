@@ -8,7 +8,6 @@ export const LOAD_STATUS_COLOR: Record<
   "default" | "info" | "success" | "warning" | "error"
 > = {
   queued: "default",
-  fleet_up: "info",
   generators_up: "info",
   ramping: "info",
   holding: "info",

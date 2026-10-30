@@ -53,6 +53,9 @@ function generatorRow(index: number, at: string, vus: number, count: number, p95
     vus,
     metrics: {
       ws_msgs_sent: { type: "counter", count, rate: count / 5 },
+      data_received: { type: "counter", count: count * 10, rate: count * 2 },
+      bytes_received: { type: "counter", count: count * 1024, rate: count * 204.8 },
+      bytes_sent: { type: "counter", count: count * 512, rate: count * 102.4 },
       event_lag_ms: { type: "trend", avg: p95 / 2, "p(90)": p95 - 2, "p(95)": p95 },
       vus: { type: "gauge", value: vus },
     },
@@ -76,6 +79,7 @@ const FLEET_ROWS: LoadStatRow[] = [
       instances: [
         { instanceId: "node-a", leader: true, cpu: 55.5, memory: 40, disk: 20, hubConnections: 260 },
         { instanceId: "node-b", leader: false, cpu: 50, memory: 38, disk: 20, hubConnections: 230 },
+        { instanceId: "node-c", leader: false, cpu: null, memory: null, disk: null, hubConnections: null },
       ],
       channelMembers: 490,
     },
@@ -117,17 +121,23 @@ describe("LoadRunPage", () => {
     mock.onGet("/mgmt/load/runs/5").reply(200, loadRunDetail());
     mockStats();
     renderRun();
-    await waitFor(() => expect(screen.getAllByTestId("metric-tile").length).toBe(3));
+    await waitFor(() => expect(screen.getAllByTestId("metric-tile").length).toBe(5));
     expect(tileValues()).toEqual({
       "total users": "490",
       "ws_msgs_sent count": "1,900",
       "event_lag_ms p(95)": "45",
+      "Bytes in": "1.9 MB",
+      "Bytes out": "950.0 KB",
     });
+    expect(screen.getByText("380.0 KB/s")).toBeInTheDocument();
+    expect(screen.getByText("190.0 KB/s")).toBeInTheDocument();
     const fleet = screen.getByRole("region", { name: "fleet" });
     expect(within(fleet).getByText("node-a")).toBeInTheDocument();
     expect(within(fleet).getByText("leader")).toBeInTheDocument();
     expect(within(fleet).getByText("55.5%")).toBeInTheDocument();
     expect(within(fleet).getByText(/channel members 490/)).toBeInTheDocument();
+    const nodeC = within(fleet).getByText("node-c").closest("tr") as HTMLElement;
+    expect(within(nodeC).getAllByText("-")).toHaveLength(3);
     const timeline = screen.getByRole("region", { name: "timeline" });
     expect(within(timeline).getByText("queued by alice")).toBeInTheDocument();
     expect(within(timeline).getByText(/hold complete/)).toBeInTheDocument();
@@ -168,6 +178,8 @@ describe("LoadRunPage", () => {
         "total users": "120",
         "custom_events count": "77",
         "join_ms p(95)": "9.25",
+        "Bytes in": "-",
+        "Bytes out": "-",
       }),
     );
     // Events for another run are ignored.
@@ -185,6 +197,7 @@ describe("LoadRunPage", () => {
     mock.onPost("/mgmt/load/runs/5/stop").reply(202);
     renderRun();
     expect(await screen.findByTestId("checked-in")).toHaveTextContent("checked in 1 of 2");
+    expect(screen.queryByText(/fleet size/i)).toBeNull();
     expect(screen.queryByLabelText("Verdict")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Stop" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Stop run" }));

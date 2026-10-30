@@ -71,7 +71,7 @@ describe("loadApi", () => {
     expect(await loadApi.scriptVersion("sample-scenario", 2)).toEqual({ version: 2, script: "y" });
   });
 
-  it("sends the pre-flight query and omits fleet when the fleet is left alone", async () => {
+  it("sends the pre-flight query without any fleet field", async () => {
     mock.onGet("/mgmt/load/preflight").reply(200, { ok: true, checks: [] });
     await loadApi.preflight({
       scenario: "sample-scenario",
@@ -79,7 +79,6 @@ describe("loadApi", () => {
       confirm: "sample-service",
       generators: 2,
       vus: 50,
-      fleet: null,
       validation: false,
     });
     expect(mock.history.get[0].params).toEqual({
@@ -90,17 +89,13 @@ describe("loadApi", () => {
       vus: 50,
       validation: false,
     });
-    expect(
-      preflightParams({
-        scenario: "s",
-        target: "t",
-        confirm: "t",
-        generators: 1,
-        vus: 1,
-        fleet: 4,
-        validation: true,
-      }).fleet,
-    ).toBe(4);
+    expect(Object.keys(preflightParams(mock.history.get[0].params))).not.toContain("fleet");
+  });
+
+  it("reads the generator group", async () => {
+    const group = { group: "sample-generators", desired: 1, inService: 1, max: 4 };
+    mock.onGet("/mgmt/load/generators").reply(200, group);
+    expect(await loadApi.generators()).toEqual(group);
   });
 
   it("starts a run and returns its id", async () => {
@@ -113,7 +108,6 @@ describe("loadApi", () => {
       vusPerGenerator: 1,
       rampSeconds: 0,
       holdSeconds: 60,
-      restoreFleet: false,
       validation: true,
     };
     expect(await loadApi.start(body)).toEqual({ runId: 9 });
@@ -167,7 +161,7 @@ describe("load errors", () => {
           error: "preflight_failed",
           checks: [
             { name: "target_confirmed", status: "red", message: "", fix: null },
-            { name: "fleet_class", status: "amber", message: "", fix: null },
+            { name: "presence_off", status: "amber", message: "", fix: null },
           ],
         }),
         "x",

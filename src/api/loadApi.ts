@@ -1,6 +1,7 @@
 import apiClient from "./apiClient";
 import { parseJobsApiError } from "./jobsApi";
 import type {
+  GeneratorGroup,
   LoadRun,
   LoadRunDetail,
   LoadRunStart,
@@ -32,7 +33,6 @@ function runPath(runId: number | string): string {
 /** Statuses a run can still leave. */
 export const NON_TERMINAL_STATUSES: readonly LoadRunStatus[] = [
   "queued",
-  "fleet_up",
   "generators_up",
   "ramping",
   "holding",
@@ -98,7 +98,7 @@ export interface ListLoadRunsOptions {
 
 /** Query string of the pre-flight request. */
 export function preflightParams(query: PreflightQuery): Record<string, string | number | boolean> {
-  const params: Record<string, string | number | boolean> = {
+  return {
     scenario: query.scenario,
     target: query.target,
     confirm: query.confirm,
@@ -106,8 +106,6 @@ export function preflightParams(query: PreflightQuery): Record<string, string | 
     vus: query.vus,
     validation: query.validation,
   };
-  if (query.fleet !== undefined && query.fleet !== null) params.fleet = query.fleet;
-  return params;
 }
 
 const loadApi = {
@@ -147,6 +145,11 @@ const loadApi = {
     return apiClient
       .get<PreflightResult>(`${base}/preflight`, { params: preflightParams(query) })
       .then((res) => ({ ...res.data, checks: res.data?.checks ?? [] }));
+  },
+
+  /** The generator group's desired, in-service and max sizes. */
+  generators(): Promise<GeneratorGroup> {
+    return apiClient.get<GeneratorGroup>(`${base}/generators`).then((res) => res.data);
   },
 
   start(body: LoadRunStart): Promise<{ runId: number }> {

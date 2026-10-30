@@ -5,6 +5,9 @@ import {
   chartSeries,
   firstTrendName,
   metricTiles,
+  byteTiles,
+  formatBytes,
+  formatByteRate,
   newestFleet,
   newestPerGenerator,
   statsStep,
@@ -70,6 +73,44 @@ describe("loadStats", () => {
     ]);
     expect(firstTrendName(aggregate)).toBe("event_lag_ms");
     expect(metricTiles(null)).toEqual([]);
+  });
+
+  it("leaves the byte counters to their own tiles", () => {
+    const aggregate: GeneratorStatsBody = {
+      at: "2026-10-01T00:00:05Z",
+      vus: 10,
+      metrics: {
+        data_received: { type: "counter", count: 5000, rate: 100 },
+        data_sent: { type: "counter", count: 4000, rate: 80 },
+        bytes_received: { type: "counter", count: 3 * 1024 * 1024 * 1024, rate: 2048 },
+        bytes_sent: { type: "counter", count: 1536, rate: 512 },
+      },
+    };
+    expect(metricTiles(aggregate)).toEqual([{ key: "vus", label: "total users", value: 10 }]);
+    expect(byteTiles(aggregate)).toEqual([
+      { key: "bytes_received", label: "Bytes in", value: "3.0 GB", rate: "2.0 KB/s" },
+      { key: "bytes_sent", label: "Bytes out", value: "1.5 KB", rate: "0.5 KB/s" },
+    ]);
+  });
+
+  it("shows a dash on the byte tiles for a run from before scenario version 3", () => {
+    const old: GeneratorStatsBody = {
+      at: "2026-10-01T00:00:05Z",
+      vus: 10,
+      metrics: { data_received: { type: "counter", count: 5000, rate: 100 } },
+    };
+    expect(byteTiles(old).map((t) => [t.label, t.value, t.rate])).toEqual([
+      ["Bytes in", "-", null],
+      ["Bytes out", "-", null],
+    ]);
+    expect(byteTiles(null).map((t) => t.value)).toEqual(["-", "-"]);
+  });
+
+  it("formats bytes as KB, MB or GB with one decimal", () => {
+    expect(formatBytes(512)).toBe("0.5 KB");
+    expect(formatBytes(2.5 * 1024 * 1024)).toBe("2.5 MB");
+    expect(formatBytes(1024 * 1024 * 1024)).toBe("1.0 GB");
+    expect(formatByteRate(10240)).toBe("10.0 KB/s");
   });
 
   it("builds the users and first trend series, merging rows that share a time", () => {

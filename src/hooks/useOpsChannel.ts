@@ -106,11 +106,3 @@ export function useJobsChannel(onEvent: ChannelHandler): OpsChannel {
 export function useLoadChannel(onEvent: ChannelHandler): OpsChannel {
   return useOpsChannel("ops:load", onEvent);
 }
-
-/**
- * Live resource updates on the "ops:resources" channel: "change" after every
- * audited change and "refresh" with instance refresh progress.
- */
-export function useResourcesChannel(onEvent: ChannelHandler): OpsChannel {
-  return useOpsChannel("ops:resources", onEvent);
-}

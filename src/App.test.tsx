@@ -49,14 +49,12 @@ beforeEach(() => {
   mock.onGet("/mgmt/jobs").reply(200, []);
   mock.onGet("/mgmt/instances").reply(200, []);
   mock.onGet("/mgmt/load/runs").reply(200, []);
-  mock.onGet("/mgmt/resources").reply(200, {
-    fleet: null,
-    generators: null,
-    cache: null,
-    database: null,
+  mock.onGet("/mgmt/load/generators").reply(200, {
+    group: "generators",
+    desired: 0,
+    inService: 0,
+    max: 4,
   });
-  mock.onGet("/mgmt/resources/fleet/refresh").reply(200, null);
-  mock.onGet("/mgmt/resources/audit").reply(200, []);
   mock.onGet(/\/mgmt\/services\/.+\/logs/).reply(200, []);
 });
 
@@ -89,7 +87,6 @@ const NAV = [
   { label: "Instances", heading: "Instances" },
   { label: "Logs", heading: "Logs" },
   { label: "Node stats", heading: "Node stats" },
-  { label: "Resources", heading: "Resources" },
 ];
 
 describe("App router smoke test", () => {

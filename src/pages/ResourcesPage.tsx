@@ -23,6 +23,7 @@ import {
 import RefreshIcon from "@mui/icons-material/Refresh";
 import resourcesApi, {
   cacheNodeTypes,
+  databaseClassOptions,
   databaseClasses,
   fleetClasses,
   isRefreshInFlight,
@@ -584,9 +585,9 @@ export default function ResourcesPage() {
                     disabled={Boolean(reason)}
                     sx={{ minWidth: 200 }}
                   >
-                    {databaseClasses(resources).map((c) => (
-                      <MenuItem key={c} value={c}>
-                        {c}
+                    {databaseClassOptions(resources).map((o) => (
+                      <MenuItem key={o.value} value={o.value}>
+                        {o.label}
                       </MenuItem>
                     ))}
                   </TextField>

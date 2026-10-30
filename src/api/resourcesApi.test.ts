@@ -8,6 +8,7 @@ vi.mock("../lib/cognitoClient", () => ({
 import apiClient from "./apiClient";
 import resourcesApi, {
   cacheNodeTypes,
+  databaseClassOptions,
   databaseClasses,
   fleetClasses,
   isRefreshInFlight,
@@ -106,6 +107,28 @@ describe("resources helpers", () => {
     expect(fleetClasses(state)).toEqual(["a"]);
     expect(cacheNodeTypes(state)).toEqual(["c"]);
     expect(databaseClasses(state)).toEqual(["d"]);
+  });
+
+  it("reads the gateway's database class objects as names with their documented connections", () => {
+    const state = {
+      fleet: null,
+      generators: null,
+      cache: null,
+      database: {
+        id: "db",
+        instanceClass: "db.small",
+        status: null,
+        maxConnections: null,
+        connectionsInUse: null,
+        classes: [{ instanceClass: "db.small", documentedMaxConnections: 112 }, { instanceClass: "db.medium", documentedMaxConnections: null }, "db.large"],
+      },
+    } as ResourcesState;
+    expect(databaseClasses(state)).toEqual(["db.small", "db.medium", "db.large"]);
+    expect(databaseClassOptions(state)).toEqual([
+      { value: "db.small", label: "db.small (112 connections documented)" },
+      { value: "db.medium", label: "db.medium" },
+      { value: "db.large", label: "db.large" },
+    ]);
   });
 
   it("isRefreshInFlight prefers inProgress and falls back to the status", () => {

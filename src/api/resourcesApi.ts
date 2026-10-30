@@ -41,9 +41,26 @@ export function cacheNodeTypes(state: ResourcesState): string[] {
   return state.cache?.nodeTypes ?? state.allowed?.cacheNodeTypes ?? [];
 }
 
-/** Database classes the operator may pick from. */
+/** A database class as a menu entry: its name, and the documented connections when the gateway gave them. */
+export interface ClassOption {
+  value: string;
+  label: string;
+}
+
+/** Database classes the operator may pick from, as menu entries. The gateway lists each class as an object
+ * with its documented max connections; an older gateway lists plain names. */
+export function databaseClassOptions(state: ResourcesState): ClassOption[] {
+  const raw = state.database?.classes ?? state.allowed?.databaseClasses ?? [];
+  return raw.map((c) => {
+    if (typeof c === "string") return { value: c, label: c };
+    const max = c.documentedMaxConnections;
+    return { value: c.instanceClass, label: max ? `${c.instanceClass} (${max.toLocaleString()} connections documented)` : c.instanceClass };
+  });
+}
+
+/** Database class names the operator may pick from. */
 export function databaseClasses(state: ResourcesState): string[] {
-  return state.database?.classes ?? state.allowed?.databaseClasses ?? [];
+  return databaseClassOptions(state).map((o) => o.value);
 }
 
 /** True while the refresh is still running. */

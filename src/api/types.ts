@@ -434,6 +434,12 @@ export interface CacheResource {
   error?: string | null;
 }
 
+/** One allowed database class as the gateway lists it, with the connections its memory documents. */
+export interface DatabaseClassOption {
+  instanceClass: string;
+  documentedMaxConnections?: number | null;
+}
+
 export interface DatabaseResource {
   id: string;
   instanceClass: string | null;
@@ -441,8 +447,8 @@ export interface DatabaseResource {
   maxConnections: number | null;
   connectionsInUse: number | null;
   documentedMaxConnections?: number | null;
-  /** Allowed database classes. */
-  classes?: string[];
+  /** Allowed database classes: plain names, or the gateway's objects with their documented connections. */
+  classes?: Array<string | DatabaseClassOption>;
   error?: string | null;
 }
 

@@ -12,10 +12,12 @@ import apiClient from "../api/apiClient";
 import type { PreflightCheck } from "../api/types";
 import LoadRunFormPage, {
   CONFIRM_HINT,
+  VALIDATION_HINT,
   buildRunStart,
   initialRunForm,
   minutesToSeconds,
   startBlockedReason,
+  withValidation,
 } from "./LoadRunFormPage";
 import { SnackbarProvider } from "../contexts/SnackbarContext";
 import { ThemeModeProvider } from "../theme/ThemeModeProvider";
@@ -85,6 +87,13 @@ describe("run form helpers", () => {
     });
   });
 
+  it("pins the sizes when the validation switch goes on and keeps them when it goes off", () => {
+    const form = { ...initialRunForm("s", false), generators: "4", vusPerGenerator: "500", rampMinutes: "5", holdMinutes: "15" };
+    const on = withValidation(form, true);
+    expect(on).toMatchObject({ validation: true, generators: "1", vusPerGenerator: "1", rampMinutes: "0", holdMinutes: "5" });
+    expect(withValidation(on, false)).toMatchObject({ validation: false, generators: "1", vusPerGenerator: "1" });
+  });
+
   it("blocks Start on a mismatched confirm or a red check", () => {
     const form = { ...initialRunForm("s", false), target: "t", confirm: "x" };
     expect(startBlockedReason(form, GREEN, false)).toMatch(/does not match/);
@@ -105,6 +114,26 @@ describe("LoadRunFormPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Params key 1")).toHaveValue("rate"));
     expect(screen.getByLabelText("Params value 1")).toHaveValue("10");
     expect(screen.getByText(CONFIRM_HINT)).toBeInTheDocument();
+  });
+
+  it("locks the size fields while the validation switch is on", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    const generators = screen.getByLabelText("Generators");
+    await user.clear(generators);
+    await user.type(generators, "4");
+    await user.click(screen.getByRole("switch", { name: "Validation run" }));
+    expect(screen.getByRole("heading", { name: "New validation run" })).toBeInTheDocument();
+    expect(generators).toBeDisabled();
+    expect(generators).toHaveValue(1);
+    expect(screen.getByLabelText("Users each")).toBeDisabled();
+    expect(screen.getByLabelText("Users each")).toHaveValue(1);
+    expect(screen.getByLabelText("Ramp minutes")).toBeDisabled();
+    expect(screen.getByLabelText("Hold minutes")).toHaveValue(5);
+    expect(screen.getAllByText(VALIDATION_HINT).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("switch", { name: "Validation run" }));
+    expect(generators).toBeEnabled();
+    expect(screen.getByRole("heading", { name: "New load run" })).toBeInTheDocument();
   });
 
   it("shows the computed total users", async () => {

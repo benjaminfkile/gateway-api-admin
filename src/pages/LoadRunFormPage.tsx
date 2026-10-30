@@ -23,6 +23,8 @@ import KeyValueRows, { mapFromRows, rowsFromMap, type KeyValueRow } from "../com
 export const PREFLIGHT_DEBOUNCE_MS = 400;
 
 export const CONFIRM_HINT = "type the target to confirm; production is allowed";
+/** What the gateway pins a validation run to, whatever the form says. */
+export const VALIDATION_HINT = "fixed for a validation run";
 
 export interface RunFormState {
   scenario: string;
@@ -54,6 +56,16 @@ export function initialRunForm(scenario: string, validation: boolean): RunFormSt
     validation,
     params: [],
   };
+}
+
+/**
+ * The form with the Validation run switch set. The gateway pins a validation run to one
+ * generator, one user, no ramp and a five minute hold and ignores the sent sizes, so the
+ * form shows those values and locks the fields while the switch is on.
+ */
+export function withValidation(form: RunFormState, validation: boolean): RunFormState {
+  if (!validation) return { ...form, validation };
+  return { ...form, validation, generators: "1", vusPerGenerator: "1", rampMinutes: "0", holdMinutes: "5" };
 }
 
 /** Whole minutes or fractions of a minute as whole seconds. */
@@ -326,6 +338,8 @@ export default function LoadRunFormPage() {
               type="number"
               value={form.generators}
               onChange={(e) => set("generators", e.target.value)}
+              disabled={form.validation}
+              helperText={form.validation ? VALIDATION_HINT : undefined}
               slotProps={{ htmlInput: { min: 1, step: 1 } }}
             />
             <TextField
@@ -333,6 +347,8 @@ export default function LoadRunFormPage() {
               type="number"
               value={form.vusPerGenerator}
               onChange={(e) => set("vusPerGenerator", e.target.value)}
+              disabled={form.validation}
+              helperText={form.validation ? VALIDATION_HINT : undefined}
               slotProps={{ htmlInput: { min: 1, step: 1, max: maxVus } }}
             />
             <Typography variant="body1" data-testid="total-users" sx={{ whiteSpace: "nowrap" }}>
@@ -345,7 +361,8 @@ export default function LoadRunFormPage() {
               type="number"
               value={form.rampMinutes}
               onChange={(e) => set("rampMinutes", e.target.value)}
-              helperText={`${minutesToSeconds(form.rampMinutes)} s`}
+              disabled={form.validation}
+              helperText={form.validation ? VALIDATION_HINT : `${minutesToSeconds(form.rampMinutes)} s`}
               slotProps={{ htmlInput: { min: 0, step: 0.5 } }}
             />
             <TextField
@@ -353,7 +370,8 @@ export default function LoadRunFormPage() {
               type="number"
               value={form.holdMinutes}
               onChange={(e) => set("holdMinutes", e.target.value)}
-              helperText={`${minutesToSeconds(form.holdMinutes)} s`}
+              disabled={form.validation}
+              helperText={form.validation ? VALIDATION_HINT : `${minutesToSeconds(form.holdMinutes)} s`}
               slotProps={{ htmlInput: { min: 0, step: 0.5 } }}
             />
           </Stack>
@@ -388,7 +406,10 @@ export default function LoadRunFormPage() {
           </Stack>
           <FormControlLabel
             control={
-              <Switch checked={form.validation} onChange={(e) => set("validation", e.target.checked)} />
+              <Switch
+                checked={form.validation}
+                onChange={(e) => setForm((f) => withValidation(f, e.target.checked))}
+              />
             }
             label="Validation run"
           />

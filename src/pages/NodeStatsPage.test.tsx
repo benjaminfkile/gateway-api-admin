@@ -172,6 +172,22 @@ describe("NodeStatsPage", () => {
     expect(within(cardFor(grid, "i-follower")).queryByText("stale")).toBeNull();
   });
 
+  it("shows the node figures the gateway measured, and dashes when it has none", async () => {
+    mock.onGet("/mgmt/instances").reply(200, [
+      inst({ instanceId: "i-measured", cpu: 4.6, memory: 75.2, disk: 31.4, hubConnections: 1234 }),
+      inst({ instanceId: "i-blank" }),
+    ]);
+    renderPage();
+    const grid = await loadedGrid("i-measured");
+    const measured = within(cardFor(grid, "i-measured")).getByRole("group", { name: "node figures" });
+    expect(within(measured).getByLabelText("CPU 4.6%")).toBeInTheDocument();
+    expect(within(measured).getByLabelText("Memory 75%")).toBeInTheDocument();
+    expect(within(measured).getByLabelText("Disk 31%")).toBeInTheDocument();
+    expect(within(measured).getByLabelText("Hub conns 1,234")).toBeInTheDocument();
+    const blank = within(cardFor(grid, "i-blank")).getByRole("group", { name: "node figures" });
+    expect(within(blank).getAllByText("-")).toHaveLength(4);
+  });
+
   it("reuses the fleet totals in the summary row", async () => {
     mock.onGet("/mgmt/instances").reply(200, [LEADER, FOLLOWER, CRASHY]);
     renderPage();

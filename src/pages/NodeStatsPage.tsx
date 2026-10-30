@@ -135,6 +135,29 @@ function ServiceRow({ service }: { service: InstanceServiceState }) {
   );
 }
 
+/** A percentage figure, or a dash when the gateway has none. */
+export function formatPercent(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(value >= 10 ? 0 : 1)}%` : "-";
+}
+
+/** A count figure, or a dash when the gateway has none. */
+export function formatCount(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "-";
+}
+
+function NodeFigure({ label, value }: { label: string; value: string }) {
+  return (
+    <Stack sx={{ minWidth: 56 }}>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }} aria-label={`${label} ${value}`}>
+        {value}
+      </Typography>
+    </Stack>
+  );
+}
+
 function InstanceCard({ instance }: { instance: InstanceInfo }) {
   return (
     <Card
@@ -179,6 +202,13 @@ function InstanceCard({ instance }: { instance: InstanceInfo }) {
             </Typography>
           </Tooltip>
           {instance.stale && <Chip label="stale" color="error" size="small" />}
+        </Stack>
+
+        <Stack direction="row" spacing={2} sx={{ mb: 1 }} role="group" aria-label="node figures">
+          <NodeFigure label="CPU" value={formatPercent(instance.cpu)} />
+          <NodeFigure label="Memory" value={formatPercent(instance.memory)} />
+          <NodeFigure label="Disk" value={formatPercent(instance.disk)} />
+          <NodeFigure label="Hub conns" value={formatCount(instance.hubConnections)} />
         </Stack>
 
         <Divider sx={{ mb: 1 }} />

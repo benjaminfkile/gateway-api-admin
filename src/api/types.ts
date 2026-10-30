@@ -78,6 +78,11 @@ export interface InstanceInfo {
   stale: boolean;
   heartbeatAt: string;
   services: InstanceServiceState[];
+  /** Node figures measured by the gateway on each heartbeat; null until the first read or when it fails. */
+  cpu?: number | null;
+  memory?: number | null;
+  disk?: number | null;
+  hubConnections?: number | null;
 }
 
 export type DeployStatus = "in_progress" | "done" | "partial" | "failed";

@@ -38,6 +38,7 @@ import { useLoadChannel } from "../hooks/useOpsChannel";
 import type { ChannelEventData } from "../lib/hubClient";
 import {
   aggregateLines,
+  byteTiles,
   chartSeries,
   firstTrendName,
   formatFigure,
@@ -75,7 +76,7 @@ export function saveBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-function Tile({ label, value }: { label: string; value: string }) {
+function Tile({ label, value, caption }: { label: string; value: string; caption?: string | null }) {
   return (
     <Paper variant="outlined" sx={{ p: 2, minWidth: 160, flex: "1 1 160px" }} data-testid="metric-tile">
       <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1.4, display: "block" }}>
@@ -84,6 +85,11 @@ function Tile({ label, value }: { label: string; value: string }) {
       <Typography variant="h5" component="div" sx={{ fontFamily: "monospace" }}>
         {value}
       </Typography>
+      {caption && (
+        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {caption}
+        </Typography>
+      )}
     </Paper>
   );
 }
@@ -293,6 +299,7 @@ export default function LoadRunPage() {
   }, [chartRows, livePoints]);
 
   const tiles = metricTiles(aggregate);
+  const bytes = byteTiles(aggregate);
 
   const confirmStop = async () => {
     setStopping(true);
@@ -427,6 +434,9 @@ export default function LoadRunPage() {
         ) : (
           tiles.map((tile) => <Tile key={tile.key} label={tile.label} value={formatFigure(tile.value)} />)
         )}
+        {bytes.map((tile) => (
+          <Tile key={tile.key} label={tile.label} value={tile.value} caption={tile.rate} />
+        ))}
       </Stack>
 
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 2 }}>

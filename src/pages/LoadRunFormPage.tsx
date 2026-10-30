@@ -34,9 +34,6 @@ export interface RunFormState {
   vusPerGenerator: string;
   rampMinutes: string;
   holdMinutes: string;
-  fleetSize: string;
-  leaveFleetAlone: boolean;
-  restoreFleet: boolean;
   validation: boolean;
   params: KeyValueRow[];
 }
@@ -50,9 +47,6 @@ export function initialRunForm(scenario: string, validation: boolean): RunFormSt
     vusPerGenerator: validation ? "1" : "100",
     rampMinutes: validation ? "0" : "5",
     holdMinutes: validation ? "5" : "10",
-    fleetSize: "",
-    leaveFleetAlone: true,
-    restoreFleet: true,
     validation,
     params: [],
   };
@@ -94,8 +88,6 @@ export function buildRunStart(form: RunFormState): LoadRunStart {
     vusPerGenerator: toInt(form.vusPerGenerator),
     rampSeconds: minutesToSeconds(form.rampMinutes),
     holdSeconds: minutesToSeconds(form.holdMinutes),
-    fleetSize: form.leaveFleetAlone ? null : toInt(form.fleetSize),
-    restoreFleet: form.leaveFleetAlone ? false : form.restoreFleet,
     validation: form.validation,
   };
   if (Object.keys(params).length > 0) body.params = params;
@@ -241,10 +233,9 @@ export default function LoadRunFormPage() {
       confirm: form.confirm.trim(),
       generators: toInt(form.generators),
       vus: toInt(form.vusPerGenerator),
-      fleet: form.leaveFleetAlone ? null : toInt(form.fleetSize),
       validation: form.validation,
     }),
-    [form.scenario, form.target, form.confirm, form.generators, form.vusPerGenerator, form.leaveFleetAlone, form.fleetSize, form.validation],
+    [form.scenario, form.target, form.confirm, form.generators, form.vusPerGenerator, form.validation],
   );
   useEffect(() => {
     if (!query.scenario || !query.target) {
@@ -373,35 +364,6 @@ export default function LoadRunFormPage() {
               disabled={form.validation}
               helperText={form.validation ? VALIDATION_HINT : `${minutesToSeconds(form.holdMinutes)} s`}
               slotProps={{ htmlInput: { min: 0, step: 0.5 } }}
-            />
-          </Stack>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: "center" }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={form.leaveFleetAlone}
-                  onChange={(e) => set("leaveFleetAlone", e.target.checked)}
-                />
-              }
-              label="Leave the fleet alone"
-            />
-            <TextField
-              label="Fleet size"
-              type="number"
-              value={form.fleetSize}
-              onChange={(e) => set("fleetSize", e.target.value)}
-              disabled={form.leaveFleetAlone}
-              slotProps={{ htmlInput: { min: 1, step: 1 } }}
-            />
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={form.restoreFleet}
-                  onChange={(e) => set("restoreFleet", e.target.checked)}
-                  disabled={form.leaveFleetAlone}
-                />
-              }
-              label="Restore fleet afterwards"
             />
           </Stack>
           <FormControlLabel

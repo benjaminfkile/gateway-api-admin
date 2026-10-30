@@ -57,7 +57,7 @@ function renderForm(path = "/load/runs/new?scenario=sample-scenario") {
 
 const GREEN: PreflightCheck[] = [
   { name: "target_known", status: "green", message: "target is a known service", fix: null },
-  { name: "fleet_class", status: "amber", message: "burstable instance type", fix: "use a fixed class" },
+  { name: "scenario_validated", status: "amber", message: "scenario not validated yet", fix: "run a validation run" },
 ];
 const RED: PreflightCheck[] = [
   ...GREEN,
@@ -70,7 +70,7 @@ describe("run form helpers", () => {
     expect(minutesToSeconds("")).toBe(0);
   });
 
-  it("builds the start body with a null fleet when the fleet is left alone", () => {
+  it("builds the start body without any fleet field", () => {
     const form = { ...initialRunForm("s", false), target: "t", confirm: "t", params: [{ key: "k", value: "v" }] };
     expect(buildRunStart(form)).toEqual({
       scenario: "s",
@@ -80,8 +80,6 @@ describe("run form helpers", () => {
       vusPerGenerator: 100,
       rampSeconds: 300,
       holdSeconds: 600,
-      fleetSize: null,
-      restoreFleet: false,
       validation: false,
       params: { k: "v" },
     });
@@ -110,7 +108,9 @@ describe("LoadRunFormPage", () => {
     expect(screen.getByLabelText("Users each")).toHaveValue(1);
     expect(screen.getByLabelText("Ramp minutes")).toHaveValue(0);
     expect(screen.getByRole("switch", { name: "Validation run" })).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Leave the fleet alone" })).toBeChecked();
+    expect(screen.queryByRole("switch", { name: "Leave the fleet alone" })).toBeNull();
+    expect(screen.queryByLabelText("Fleet size")).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Restore fleet afterwards" })).toBeNull();
     await waitFor(() => expect(screen.getByLabelText("Params key 1")).toHaveValue("rate"));
     expect(screen.getByLabelText("Params value 1")).toHaveValue("10");
     expect(screen.getByText(CONFIRM_HINT)).toBeInTheDocument();
@@ -168,7 +168,7 @@ describe("LoadRunFormPage", () => {
     await waitFor(() => expect(start).toBeEnabled());
     const lastPreflight = mock.history.get.filter((r) => r.url === "/mgmt/load/preflight").at(-1);
     expect(lastPreflight?.params).toMatchObject({ confirm: "sample-service", target: "sample-service" });
-    expect(within(screen.getByTestId("check-fleet_class")).getByText(/use a fixed class/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("check-scenario_validated")).getByText(/run a validation run/)).toBeInTheDocument();
 
     await user.click(start);
     await screen.findByText("run page 12");
@@ -177,8 +177,11 @@ describe("LoadRunFormPage", () => {
       target: "sample-service",
       confirm: "sample-service",
       params: { rate: "10" },
-      fleetSize: null,
     });
+    const body = JSON.parse(mock.history.post[0].data);
+    expect(body).not.toHaveProperty("fleetSize");
+    expect(body).not.toHaveProperty("restoreFleet");
+    expect(lastPreflight?.params).not.toHaveProperty("fleet");
   });
 
   it("shows the checks from a 409 preflight_failed answer", async () => {

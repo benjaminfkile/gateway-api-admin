@@ -1,6 +1,6 @@
 import type { LoadRun, LoadRunDetail, LoadScenario } from "../api/types";
 
-// Placeholder load fixtures shared by the Load, run view, Resources and banner tests.
+// Placeholder load fixtures shared by the Load, run view and banner tests.
 
 export function loadRun(overrides: Partial<LoadRun> = {}): LoadRun {
   return {
@@ -15,9 +15,6 @@ export function loadRun(overrides: Partial<LoadRun> = {}): LoadRun {
     vusPerGenerator: 250,
     rampSeconds: 300,
     holdSeconds: 600,
-    fleetSizeRequested: null,
-    fleetSizeBefore: null,
-    restoreFleet: false,
     hardStopAt: "2026-10-01T01:00:00Z",
     checkedIn: 2,
     queuedAt: "2026-10-01T00:00:00Z",

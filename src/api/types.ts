@@ -224,10 +224,9 @@ export interface ScriptVersionBody {
   script: string;
 }
 
-/** Lifecycle of a load run. The first six are non-terminal. */
+/** Lifecycle of a load run. The first five are non-terminal. */
 export type LoadRunStatus =
   | "queued"
-  | "fleet_up"
   | "generators_up"
   | "ramping"
   | "holding"
@@ -294,7 +293,6 @@ export interface PreflightQuery {
   confirm: string;
   generators: number;
   vus: number;
-  fleet?: number | null;
   validation: boolean;
 }
 
@@ -308,8 +306,6 @@ export interface LoadRunStart {
   rampSeconds: number;
   holdSeconds: number;
   params?: Record<string, string>;
-  fleetSize?: number | null;
-  restoreFleet: boolean;
   validation: boolean;
 }
 
@@ -326,9 +322,6 @@ export interface LoadRun {
   vusPerGenerator: number;
   rampSeconds: number;
   holdSeconds: number;
-  fleetSizeRequested: number | null;
-  fleetSizeBefore: number | null;
-  restoreFleet: boolean;
   hardStopAt: string | null;
   checkedIn: number;
   queuedAt: string;
@@ -402,89 +395,10 @@ export interface LoadStatsQuery {
   step?: number;
 }
 
-export interface FleetResource {
-  group: string;
-  min: number;
-  desired: number;
-  max: number;
-  inService: number;
-  instanceClass: string | null;
-  templateVersion: string | number | null;
-  refreshInProgress: boolean;
-  /** Allowed fleet instance types. */
-  classes?: string[];
-  maxSize?: number;
-  error?: string | null;
-}
-
-export interface GeneratorsResource {
+/** `GET /mgmt/load/generators`: the generator group's sizes. */
+export interface GeneratorGroup {
   group: string;
   desired: number;
   inService: number;
   max: number;
-  error?: string | null;
-}
-
-export interface CacheResource {
-  id: string;
-  nodeType: string | null;
-  status: string | null;
-  /** Allowed cache node types. */
-  nodeTypes?: string[];
-  error?: string | null;
-}
-
-/** One allowed database class as the gateway lists it, with the connections its memory documents. */
-export interface DatabaseClassOption {
-  instanceClass: string;
-  documentedMaxConnections?: number | null;
-}
-
-export interface DatabaseResource {
-  id: string;
-  instanceClass: string | null;
-  status: string | null;
-  maxConnections: number | null;
-  connectionsInUse: number | null;
-  documentedMaxConnections?: number | null;
-  /** Allowed database classes: plain names, or the gateway's objects with their documented connections. */
-  classes?: Array<string | DatabaseClassOption>;
-  error?: string | null;
-}
-
-/** `GET /mgmt/resources`. A block is null when its configuration key is unset. */
-export interface ResourcesState {
-  runActive?: boolean;
-  fleet: FleetResource | null;
-  generators: GeneratorsResource | null;
-  cache: CacheResource | null;
-  database: DatabaseResource | null;
-  /** Older shape of the allow lists; the per-block lists win when present. */
-  allowed?: {
-    fleetClasses?: string[];
-    cacheNodeTypes?: string[];
-    databaseClasses?: string[];
-  };
-}
-
-/** The fleet group's newest instance refresh. */
-export interface FleetRefresh {
-  group?: string;
-  refreshId?: string;
-  id?: string;
-  status: string;
-  percentComplete: number | null;
-  inProgress?: boolean;
-}
-
-export interface ResourceAuditEntry {
-  id?: number;
-  at: string;
-  actor: string;
-  resource: string;
-  action: string;
-  before: string | null;
-  after: string | null;
-  /** What the change carried: a string, or the gateway's object (for a database class change `{ id, services, note }`). */
-  detail: string | Record<string, unknown> | null;
 }

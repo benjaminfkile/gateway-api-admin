@@ -20,7 +20,6 @@ import DnsIcon from "@mui/icons-material/Dns";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
 import SpeedIcon from "@mui/icons-material/Speed";
-import TuneIcon from "@mui/icons-material/Tune";
 import LogoutIcon from "@mui/icons-material/Logout";
 import ThemeToggle from "./ThemeToggle";
 import LoadBanner from "./LoadBanner";
@@ -36,7 +35,6 @@ const NAV_ITEMS = [
   { label: "Instances", path: "/instances", icon: <DnsIcon /> },
   { label: "Logs", path: "/logs", icon: <TerminalIcon /> },
   { label: "Node stats", path: "/stats", icon: <MonitorHeartIcon /> },
-  { label: "Resources", path: "/resources", icon: <TuneIcon /> },
 ];
 
 export default function AppShell() {

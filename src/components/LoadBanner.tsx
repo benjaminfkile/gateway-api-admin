@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button } from "@mui/material";
 import loadApi, { isRunActive, loadErrorMessage } from "../api/loadApi";
-import resourcesApi from "../api/resourcesApi";
 import type { LoadRun, LoadRunStatus } from "../api/types";
 import { useSnackbar } from "../contexts/SnackbarContext";
 import { useLoadChannel } from "../hooks/useOpsChannel";
 import type { ChannelEventData } from "../lib/hubClient";
 import ConfirmDialog from "./ConfirmDialog";
 
-/** Poll of the run list and the resources behind the banner. */
+/** Poll of the run list and the generator group behind the banner. */
 export const BANNER_POLL_MS = 30_000;
 
 /** The banner text for an active run. */
@@ -20,8 +19,9 @@ export function bannerText(run: LoadRun): string {
 /**
  * Red banner above every page while a load run is non-terminal or the
  * generator group is above zero. Driven by ops:load `run` events and a
- * {@link BANNER_POLL_MS} poll of the run list and the resources; hidden when
- * both are quiet.
+ * {@link BANNER_POLL_MS} poll of the run list and the generator group; hidden
+ * when both are quiet. A gateway without the generator group read falls back
+ * to the active run's checked-in and generator counts.
  */
 export default function LoadBanner() {
   const { showSuccess, showError } = useSnackbar();
@@ -31,15 +31,19 @@ export default function LoadBanner() {
   const [stopping, setStopping] = useState(false);
 
   const load = useCallback(async () => {
-    const [runs, resources] = await Promise.allSettled([
+    const [runs, group] = await Promise.allSettled([
       loadApi.runs({ limit: 10 }),
-      resourcesApi.get(),
+      loadApi.generators(),
     ]);
+    let active: LoadRun | null | undefined;
     if (runs.status === "fulfilled" && Array.isArray(runs.value)) {
-      setRun(runs.value.find((r) => isRunActive(r)) ?? null);
+      active = runs.value.find((r) => isRunActive(r)) ?? null;
+      setRun(active);
     }
-    if (resources.status === "fulfilled") {
-      setGeneratorsUp((resources.value?.generators?.desired ?? 0) > 0);
+    if (group.status === "fulfilled") {
+      setGeneratorsUp((group.value?.desired ?? 0) > 0);
+    } else if (active !== undefined) {
+      setGeneratorsUp(Boolean(active && (active.checkedIn > 0 || active.generators > 0)));
     }
   }, []);
 

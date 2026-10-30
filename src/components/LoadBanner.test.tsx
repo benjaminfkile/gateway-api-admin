@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 function generators(desired: number) {
-  return { fleet: null, cache: null, database: null, generators: { group: "g", desired, inService: desired, max: 2 } };
+  return { group: "sample-generators", desired, inService: desired, max: 2 };
 }
 
 function renderBanner() {
@@ -49,7 +49,7 @@ const ACTIVE = loadRun({ id: 6, status: "ramping", finishedAt: null });
 describe("LoadBanner", () => {
   it("is hidden when no run is active and the generators are at zero", async () => {
     mock.onGet("/mgmt/load/runs").reply(200, [loadRun()]);
-    mock.onGet("/mgmt/resources").reply(200, generators(0));
+    mock.onGet("/mgmt/load/generators").reply(200, generators(0));
     renderBanner();
     await waitFor(() => expect(mock.history.get).toHaveLength(2));
     expect(screen.queryByRole("alert")).toBeNull();
@@ -58,7 +58,7 @@ describe("LoadBanner", () => {
   it("shows an active run with Stop, which confirms and posts", async () => {
     const user = userEvent.setup();
     mock.onGet("/mgmt/load/runs").reply(200, [ACTIVE]);
-    mock.onGet("/mgmt/resources").reply(200, generators(2));
+    mock.onGet("/mgmt/load/generators").reply(200, generators(2));
     mock.onPost("/mgmt/load/runs/6/stop").reply(202);
     renderBanner();
     const banner = await screen.findByRole("alert");
@@ -71,7 +71,7 @@ describe("LoadBanner", () => {
 
   it("warns about generators above zero with no run", async () => {
     mock.onGet("/mgmt/load/runs").reply(200, []);
-    mock.onGet("/mgmt/resources").reply(200, generators(1));
+    mock.onGet("/mgmt/load/generators").reply(200, generators(1));
     renderBanner();
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent("Generators above zero with no run");
@@ -81,7 +81,7 @@ describe("LoadBanner", () => {
   it("appears on a run event and hides when the run ends", async () => {
     let runs = [loadRun()];
     mock.onGet("/mgmt/load/runs").reply(() => [200, runs]);
-    mock.onGet("/mgmt/resources").reply(200, generators(0));
+    mock.onGet("/mgmt/load/generators").reply(200, generators(0));
     renderBanner();
     await waitFor(() => expect(hubClient.joinChannel).toHaveBeenCalledWith("ops:load"));
     runs = [ACTIVE];
@@ -90,5 +90,13 @@ describe("LoadBanner", () => {
     runs = [{ ...ACTIVE, status: "succeeded" }];
     act(() => hub.emit("ops:load", "run", { runId: 6, status: "succeeded" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  it("falls back to the active run when the generator group read is missing", async () => {
+    mock.onGet("/mgmt/load/runs").reply(200, [loadRun()]);
+    mock.onGet("/mgmt/load/generators").reply(404);
+    renderBanner();
+    await waitFor(() => expect(mock.history.get).toHaveLength(2));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

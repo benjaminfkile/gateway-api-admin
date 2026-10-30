@@ -26,6 +26,7 @@ import resourcesApi, {
   databaseClassOptions,
   databaseClasses,
   fleetClasses,
+  formatAuditDetail,
   isRefreshInFlight,
   resourcesErrorMessage,
 } from "../api/resourcesApi";
@@ -666,7 +667,7 @@ export default function ResourcesPage() {
                 <TableCell>{entry.action}</TableCell>
                 <TableCell sx={{ fontFamily: "monospace" }}>{auditValue(entry.before) || "-"}</TableCell>
                 <TableCell sx={{ fontFamily: "monospace" }}>{auditValue(entry.after) || "-"}</TableCell>
-                <TableCell>{entry.detail ?? ""}</TableCell>
+                <TableCell>{formatAuditDetail(entry.detail)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

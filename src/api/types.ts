@@ -485,5 +485,6 @@ export interface ResourceAuditEntry {
   action: string;
   before: string | null;
   after: string | null;
-  detail: string | null;
+  /** What the change carried: a string, or the gateway's object (for a database class change `{ id, services, note }`). */
+  detail: string | Record<string, unknown> | null;
 }

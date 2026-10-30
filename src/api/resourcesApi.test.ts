@@ -10,6 +10,7 @@ import resourcesApi, {
   cacheNodeTypes,
   databaseClassOptions,
   databaseClasses,
+  formatAuditDetail,
   fleetClasses,
   isRefreshInFlight,
   resourcesErrorMessage,
@@ -107,6 +108,13 @@ describe("resources helpers", () => {
     expect(fleetClasses(state)).toEqual(["a"]);
     expect(cacheNodeTypes(state)).toEqual(["c"]);
     expect(databaseClasses(state)).toEqual(["d"]);
+  });
+
+  it("formats an audit detail whether it is a string or the gateway's object", () => {
+    expect(formatAuditDetail(null)).toBe("");
+    expect(formatAuditDetail("plain")).toBe("plain");
+    expect(formatAuditDetail({ id: "db", services: ["a", "b"], note: "Reboots the database." })).toBe("Reboots the database. Services: a, b id: db");
+    expect(formatAuditDetail({ id: "cache", note: "Replaces the node." })).toBe("Replaces the node. id: cache");
   });
 
   it("reads the gateway's database class objects as names with their documented connections", () => {

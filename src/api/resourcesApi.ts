@@ -63,6 +63,23 @@ export function databaseClasses(state: ResourcesState): string[] {
   return databaseClassOptions(state).map((o) => o.value);
 }
 
+/** A change's detail as one line: a string as is; the gateway's object as its note, then its
+ * services and other fields, so an audit row never hands React an object. */
+export function formatAuditDetail(detail: unknown): string {
+  if (detail === null || detail === undefined) return "";
+  if (typeof detail === "string") return detail;
+  if (typeof detail !== "object") return String(detail);
+  const d = detail as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof d.note === "string" && d.note) parts.push(d.note);
+  if (Array.isArray(d.services) && d.services.length) parts.push(`Services: ${d.services.map(String).join(", ")}`);
+  for (const [k, v] of Object.entries(d)) {
+    if (k === "note" || k === "services" || v === null || v === undefined) continue;
+    parts.push(`${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
+  }
+  return parts.join(" ");
+}
+
 /** True while the refresh is still running. */
 export function isRefreshInFlight(refresh: FleetRefresh | null | undefined): boolean {
   if (!refresh) return false;
